@@ -261,8 +261,12 @@ def index():
     <body>
       <div class="card">
         <h1>LLM-palvelin</h1>
-        <p>LO100 virran tila: <b>{power}</b></p>
-        <p>LLM API: <span class="{ 'status-ok' if up else 'status-bad' }">{'UP' if up else 'DOWN'}</span></p>
+        <p>LO100 virran tila: <b id="power-status">{power}</b></p>
+        <p>LLM API:
+          <span id="llm-api-status" class="{ 'status-ok' if up else 'status-bad' }">
+            {'UP' if up else 'DOWN'}
+          </span>
+        </p>
 
         <form method="post" action="/power" class="power-buttons">
           <button name="action" value="on">Power ON</button>
@@ -308,6 +312,32 @@ def index():
           chatContainer.scrollTop = chatContainer.scrollHeight;
           return div;
         }}
+
+        async function refreshStatus() {{
+          try {{
+            const response = await fetch('/api/status');
+            if (!response.ok) {{
+              throw new Error('HTTP ' + response.status);
+            }}
+            const data = await response.json();
+            const powerEl = document.getElementById('power-status');
+            const llmEl = document.getElementById('llm-api-status');
+
+            if (powerEl && data.power) {{
+              powerEl.textContent = data.power;
+            }}
+
+            if (llmEl) {{
+              llmEl.textContent = data.llm_up ? 'UP' : 'DOWN';
+              llmEl.classList.remove('status-ok', 'status-bad');
+              llmEl.classList.add(data.llm_up ? 'status-ok' : 'status-bad');
+            }}
+          }} catch (e) {{
+            // esim. agentti-VM alhaalla → voidaan halutessa näyttää jotain
+            console.warn('Status-päivitys epäonnistui:', e);
+          }}
+        }}
+
 
         async function sendMessage() {{
           const prompt = promptInput.value.trim();
@@ -368,6 +398,13 @@ def index():
             sendMessage();
           }}
         }});
+
+        // Päivitä status heti sivun latauksen jälkeen ja sen jälkeen 10 s välein
+        window.addEventListener('load', () => {{
+          refreshStatus();
+          setInterval(refreshStatus, 10000);
+        }});
+        
       </script>
     </body>
     </html>
@@ -436,3 +473,16 @@ def api_wake_llm():
 def api_shutdown_llm():
     msg = lo100_power("soft")
     return {"message": msg}
+
+@app.get("/api/status")
+def api_status():
+    """
+    Yksinkertainen status-endpoint UI:lle.
+    Palauttaa LO100 virran tilan ja LLM API -statuksen.
+    """
+    up = llm_server_up()
+    power = lo100_power_status()
+    return {
+        "llm_up": up,
+        "power": power,
+    }
