@@ -25,6 +25,12 @@ LLM_POLL_INTERVAL = float(os.getenv("LLM_POLL_INTERVAL", "5"))
 # Kuinka kauan ilman käyttöä ennen automaattista sammutusta (sekunteina)
 LLM_IDLE_SECONDS = int(os.getenv("LLM_IDLE_SECONDS", "1800"))  # esim. 30 min
 
+# Mitkä mallit näkyvissä, vaikka palvelin olisi sammuksissa
+DEFAULT_MODELS = os.getenv(
+    "DEFAULT_MODELS",
+    "deepseek-coder:1.3b,deepseek-coder:6.7b"
+).split(",")
+
 _last_activity = datetime.datetime.utcnow()
 
 
@@ -76,13 +82,20 @@ def lo100_power(action: str) -> str:
 
 
 def get_models():
+    models = []
     try:
         r = requests.get(f"http://{LLM_HOST}:{LLM_PORT}/api/tags", timeout=2)
         r.raise_for_status()
         data = r.json()
-        return [m["name"] for m in data.get("models", [])]
+        models = [m["name"] for m in data.get("models", [])]
     except Exception:
-        return []
+        # ei saada yhteyttä Ollamaan → käytä fallbackia
+        pass
+
+    if not models:
+        models = [m.strip() for m in DEFAULT_MODELS if m.strip()]
+
+    return models
 
 
 def ensure_llm_running() -> bool:
@@ -136,10 +149,13 @@ async def _startup():
 def index():
     up = llm_server_up()
     power = lo100_power_status()
-    models = get_models() if up else []
+    models = get_models()
     html_models = "".join(
         f'<option value="{m}">{m}</option>' for m in models
-    ) or '<option disabled>Ei malleja (palvelin ei päällä?)</option>'
+    )
+
+    if not html_models:
+        html_models = '<option disabled>Ei malleja (ei konfiguroitu)</option>'
 
     html = f"""
     <html>
