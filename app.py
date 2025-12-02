@@ -80,6 +80,43 @@ def lo100_power(action: str) -> str:
     except Exception as e:
         return f"ERROR: {e}"
 
+def get_lo100_health_and_temp():
+    """
+    Palauttaa (system_health, cpu_temp) LO100:n sensoreista.
+    system_health: esim. 'ok', 'critical', tms. tai None
+    cpu_temp: esim. '42 degrees C' tai None
+    """
+    health = None
+    cpu_temp = None
+    cmd = [
+        "ipmitool",
+        "-I", "lanplus",
+        "-H", LO100_IP,
+        "-U", LO100_USER,
+        "-P", LO100_PASS,
+        "sensor"
+    ]
+    try:
+        out = subprocess.check_output(cmd, text=True, timeout=5)
+        for line in out.splitlines():
+            # ipmitool sensor -rivi on tyyliä:
+            # "CPU0 Dmn0 Temp | 42 degrees C | ok | ... "
+            parts = [p.strip() for p in line.split("|")]
+            if len(parts) < 2:
+                continue
+            name = parts[0]
+            reading = parts[1]
+
+            if name.startswith("System Health"):
+                health = reading  # esim. 'ok'
+            elif name.startswith("CPU0 Dmn0 Temp"):
+                cpu_temp = reading  # esim. '42 degrees C'
+    except Exception:
+        # jos ipmitool ei onnistu, pidetään vain None-arvot
+        pass
+
+    return health, cpu_temp
+
 
 def get_models():
     models = []
@@ -267,6 +304,14 @@ def index():
             {'UP' if up else 'DOWN'}
           </span>
         </p>
+        <p>System health:
+          <span id="system-health" class="status-bad">
+            tuntematon
+          </span>
+        </p>
+        <p>CPU0 lämpötila:
+          <span id="cpu-temp">-</span>
+        </p>
 
         <form method="post" action="/power" class="power-buttons">
           <button name="action" value="on">Power ON</button>
@@ -322,6 +367,8 @@ def index():
             const data = await response.json();
             const powerEl = document.getElementById('power-status');
             const llmEl = document.getElementById('llm-api-status');
+            const healthEl = document.getElementById('system-health');
+            const cpuTempEl = document.getElementById('cpu-temp');
 
             if (powerEl && data.power) {{
               powerEl.textContent = data.power;
@@ -332,11 +379,36 @@ def index():
               llmEl.classList.remove('status-ok', 'status-bad');
               llmEl.classList.add(data.llm_up ? 'status-ok' : 'status-bad');
             }}
+
+            if (healthEl) {{
+              const h = data.system_health;
+              if (h) {{
+                healthEl.textContent = h;
+                healthEl.classList.remove('status-ok', 'status-bad');
+                const ok =
+                  typeof h === 'string'
+                    ? h.toLowerCase().startsWith('ok')
+                    : false;
+                healthEl.classList.add(ok ? 'status-ok' : 'status-bad');
+              }} else {{
+                healthEl.textContent = 'tuntematon';
+                healthEl.classList.remove('status-ok', 'status-bad');
+              }}
+            }}
+
+            if (cpuTempEl) {{
+              cpuTempEl.textContent = data.cpu_temp || '-';
+            }}
           }} catch (e) {{
-            // esim. agentti-VM alhaalla → voidaan halutessa näyttää jotain
             console.warn('Status-päivitys epäonnistui:', e);
           }}
         }}
+
+        // Päivitä status heti ja sitten 10 s välein
+        window.addEventListener('load', () => {{
+          refreshStatus();
+          setInterval(refreshStatus, 10000);
+        }});
 
 
         async function sendMessage() {{
@@ -399,12 +471,7 @@ def index():
           }}
         }});
 
-        // Päivitä status heti sivun latauksen jälkeen ja sen jälkeen 10 s välein
-        window.addEventListener('load', () => {{
-          refreshStatus();
-          setInterval(refreshStatus, 10000);
-        }});
-        
+       
       </script>
     </body>
     </html>
@@ -469,20 +536,19 @@ def api_wake_llm():
     return {"ok": ok, "up": llm_server_up()}
 
 
-@app.post("/api/shutdown_llm")
-def api_shutdown_llm():
-    msg = lo100_power("soft")
-    return {"message": msg}
-
 @app.get("/api/status")
 def api_status():
     """
     Yksinkertainen status-endpoint UI:lle.
-    Palauttaa LO100 virran tilan ja LLM API -statuksen.
+    Palauttaa LO100 virran tilan, LLM API -statuksen,
+    sekä system healthin ja CPU-lämpötilan.
     """
     up = llm_server_up()
     power = lo100_power_status()
+    health, cpu_temp = get_lo100_health_and_temp()
     return {
         "llm_up": up,
         "power": power,
+        "system_health": health,
+        "cpu_temp": cpu_temp,
     }
