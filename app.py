@@ -59,7 +59,12 @@ def lo100_power_status() -> str:
         "chassis", "power", "status",
     ]
     try:
-        out = subprocess.check_output(cmd, text=True, timeout=5)
+        out = subprocess.check_output(
+            cmd, 
+            text=True, 
+            timeout=5,
+            stderr=subprocess.DEVNULL
+        )
         return out.strip()
     except Exception as e:
         return f"ERROR: {e}"
@@ -75,7 +80,12 @@ def lo100_power(action: str) -> str:
         "chassis", "power", action,
     ]
     try:
-        out = subprocess.check_output(cmd, text=True, timeout=10)
+        out = subprocess.check_output(
+            cmd, 
+            text=True, 
+            timeout=10,
+            stderr=subprocess.DEVNULL
+        )
         return out.strip()
     except Exception as e:
         return f"ERROR: {e}"
@@ -99,7 +109,12 @@ def get_lo100_health_and_temp():
     ]
 
     try:
-        out = subprocess.check_output(cmd, text=True, timeout=5)
+        out = subprocess.check_output(
+            cmd,
+            text=True,
+            timeout=5,
+            stderr=subprocess.DEVNULL,  # vaimennetaan ipmitoolin virheilmoitukset
+        )
     except Exception:
         return "unknown", cpu_temp
 
@@ -366,6 +381,20 @@ def index():
           cursor: default;
         }}
       </style>
+
+      <!-- Markdown-renderöinti -->
+      <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+      <!-- MathJax LaTeX-kaavoille -->
+      <script>
+        window.MathJax = {{
+          tex: {{ inlineMath: [['$', '$'], ['\\\\(', '\\\\)']] }},
+          svg: {{ fontCache: 'global' }}
+        }};
+      </script>
+      <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg-full.js" async></script>
+
+
     </head>
     <body>
       <div class="card">
@@ -488,15 +517,20 @@ def index():
           const model = modelSelect.value;
           if (!prompt || !modelSelect.value || modelSelect.disabled) return;
 
+          // oma viesti kuplaan
           appendMessage(prompt, 'user');
           promptInput.value = '';
           promptInput.focus();
 
+          // assistentin kupla (tyhjä aluksi)
           const assistantDiv = appendMessage('', 'assistant');
 
           sendBtn.disabled = true;
           modelSelect.disabled = true;
           statusLine.textContent = 'Thinking...';
+
+          // tähän kerätään koko assistentin teksti, jota lopuksi renderöidään Markdownina
+          let assistantText = '';
 
           try {{
             const formData = new FormData();
@@ -521,8 +555,35 @@ def index():
               done = result.done;
               if (result.value) {{
                 const chunk = decoder.decode(result.value, {{ stream: true }});
-                assistantDiv.textContent += chunk;
-                chatContainer.scrollTop = chatContainer.scrollHeight;
+                assistantText += chunk;
+
+                // Tarkista oliko käyttäjä alareunassa ENNEN päivitystä
+                const isAtBottom =
+                  chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight < 20;
+
+                // Päivitä kuplan raakateksti streamin aikana
+                assistantDiv.textContent = assistantText;
+
+                // Scrollaa alas vain jos käyttäjä oli jo alhaalla
+                if (isAtBottom) {{
+                  chatContainer.scrollTop = chatContainer.scrollHeight;
+                }}
+              }}
+            }}
+
+            // Streami valmis → renderöidään markdown + kaavat
+            if (window.marked) {{
+              const html = window.marked.parse(assistantText);
+              assistantDiv.innerHTML = html;
+            }} else {{
+              assistantDiv.textContent = assistantText;
+            }}
+
+            if (window.MathJax && window.MathJax.typesetPromise) {{
+              try {{
+                await MathJax.typesetPromise([assistantDiv]);
+              }} catch (e) {{
+                console.warn('MathJax error', e);
               }}
             }}
 
