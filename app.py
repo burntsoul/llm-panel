@@ -86,8 +86,9 @@ def get_lo100_health_and_temp():
     system_health: esim. 'ok', 'critical', tms. tai None
     cpu_temp: esim. '42 degrees C' tai None
     """
-    health = None
+    
     cpu_temp = None
+    worst_level = 0  # 0=unknown, 1=ok, 2=warning, 3=critical
     cmd = [
         "ipmitool",
         "-I", "lanplus",
@@ -99,21 +100,46 @@ def get_lo100_health_and_temp():
     try:
         out = subprocess.check_output(cmd, text=True, timeout=5)
         for line in out.splitlines():
-            # ipmitool sensor -rivi on tyyliä:
-            # "CPU0 Dmn0 Temp | 42 degrees C | ok | ... "
             parts = [p.strip() for p in line.split("|")]
-            if len(parts) < 2:
+            if len(parts) < 3:
                 continue
+
             name = parts[0]
             reading = parts[1]
+            status = parts[2].lower()
 
-            if name.startswith("System Health"):
-                health = reading  # esim. 'ok'
-            elif name.startswith("CPU0 Dmn0 Temp"):
-                cpu_temp = reading  # esim. '42 degrees C'
+            # poimi CPU0 Dmn0 Temp
+            if "cpu0 dmn0 temp" in name.lower():
+                cpu_temp = reading  # esim. "30 deg. C"
+
+            # tulkitaan statuksen "vakavuus"
+            level = 0
+            if any(word in status for word in ["critical", "non-recoverable", "unrecoverable", "nr", "cr", "fail", "fault"]):
+                level = 3
+            elif any(word in status for word in ["warning", "non-critical", "nc", "unavailable"]):
+                level = 2
+            elif (
+                status.startswith("ok")
+                or "normal operating range" in status
+                or "state deasserted" in status
+            ):
+                level = 1
+
+            if level > worst_level:
+                worst_level = level
+
     except Exception:
-        # jos ipmitool ei onnistu, pidetään vain None-arvot
-        pass
+        # jos ipmitool epäonnistuu, palautetaan None,None
+        return None, cpu_temp
+
+    if worst_level == 0:
+        health = None
+    elif worst_level == 1:
+        health = "ok"
+    elif worst_level == 2:
+        health = "warning"
+    else:
+        health = "critical"
 
     return health, cpu_temp
 
