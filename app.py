@@ -4,10 +4,13 @@ import subprocess
 import requests
 import os
 import json
+import time
+import datetime
+import asyncio
 
 app = FastAPI()
 
-# Aseta nämä halutuksi (voit myös myöhemmin siirtää env-muuttujiin)
+# Konfiguraatio – voit muuttaa näitä .env:llä tai export-komennolla
 LO100_IP = os.getenv("LO100_IP", "192.168.8.33")
 LO100_USER = os.getenv("LO100_USER", "admin")
 LO100_PASS = os.getenv("LO100_PASS", "Azcxn669")
@@ -15,8 +18,24 @@ LO100_PASS = os.getenv("LO100_PASS", "Azcxn669")
 LLM_HOST = os.getenv("LLM_HOST", "192.168.8.31")  # llm-serverin IP
 LLM_PORT = int(os.getenv("LLM_PORT", "11434"))
 
+# Kuinka kauan odotetaan käynnistyvää LLM-palvelinta (sekunteina)
+LLM_BOOT_TIMEOUT = int(os.getenv("LLM_BOOT_TIMEOUT", "180"))
+LLM_POLL_INTERVAL = float(os.getenv("LLM_POLL_INTERVAL", "5"))
+
+# Kuinka kauan ilman käyttöä ennen automaattista sammutusta (sekunteina)
+LLM_IDLE_SECONDS = int(os.getenv("LLM_IDLE_SECONDS", "1800"))  # esim. 30 min
+
+_last_activity = datetime.datetime.utcnow()
+
+
+def _touch_activity():
+    """Merkitse, että LLM:ää juuri käytettiin."""
+    global _last_activity
+    _last_activity = datetime.datetime.utcnow()
+
 
 def llm_server_up() -> bool:
+    """Tarkista vastaako Ollama /api/tags:iin."""
     try:
         r = requests.get(f"http://{LLM_HOST}:{LLM_PORT}/api/tags", timeout=1.5)
         return r.ok
@@ -64,6 +83,53 @@ def get_models():
         return [m["name"] for m in data.get("models", [])]
     except Exception:
         return []
+
+
+def ensure_llm_running() -> bool:
+    """
+    Varmista, että LLM-palvelin on käynnissä.
+    - Jos on jo UP, palauttaa True.
+    - Muuten lähettää LO100:lle 'power on' ja odottaa, kunnes /api/tags vastaa
+      tai timeout.
+    """
+    if llm_server_up():
+        return True
+
+    # Käynnistä palvelin LO100:n kautta
+    lo100_power("on")
+
+    deadline = time.time() + LLM_BOOT_TIMEOUT
+    while time.time() < deadline:
+        if llm_server_up():
+            return True
+        time.sleep(LLM_POLL_INTERVAL)
+
+    # Viimeinen tarkistus
+    return llm_server_up()
+
+
+async def idle_shutdown_loop():
+    """
+    Taustasäie, joka tarkkailee LLM:n käyttöä ja sammuttaa sen kun sitä
+    ei ole käytetty pitkään aikaan.
+    """
+    global _last_activity
+    while True:
+        await asyncio.sleep(60)  # tarkista minuutin välein
+        if not llm_server_up():
+            continue
+        idle = (datetime.datetime.utcnow() - _last_activity).total_seconds()
+        if idle > LLM_IDLE_SECONDS:
+            # Yritä ensin soft shutdown
+            lo100_power("soft")
+            # Jos haluat varmistaa, että se oikeasti menee kiinni,
+            # tänne voisi halutessa lisätä vielä odottelua ja tarvittaessa "off".
+
+
+@app.on_event("startup")
+async def _startup():
+    # Käynnistä idle-shutdown -looppi taustalle
+    asyncio.create_task(idle_shutdown_loop())
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -116,12 +182,15 @@ def index():
           background: #f9fafb;
           border: 1px solid #e5e7eb;
           margin-bottom: 0.75rem;
+          display: flex;
+          flex-direction: column;
         }}
         .msg {{
           padding: 0.5rem 0.75rem;
           border-radius: 8px;
           margin-bottom: 0.35rem;
           white-space: pre-wrap;
+          max-width: 80%;
         }}
         .msg-user {{
           background: #dbeafe;
@@ -134,6 +203,7 @@ def index():
         .msg-system {{
           font-size: 0.85rem;
           color: #6b7280;
+          align-self: center;
         }}
         #input-row {{
           display: flex;
@@ -216,6 +286,7 @@ def index():
           div.classList.add('msg');
           if (role === 'user') div.classList.add('msg-user');
           if (role === 'assistant') div.classList.add('msg-assistant');
+          if (role === 'system') div.classList.add('msg-system');
           div.textContent = text;
           chatContainer.appendChild(div);
           chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -227,12 +298,10 @@ def index():
           const model = modelSelect.value;
           if (!prompt || !modelSelect.value || modelSelect.disabled) return;
 
-          // Näytä oma viesti
           appendMessage(prompt, 'user');
           promptInput.value = '';
           promptInput.focus();
 
-          // Luodaan tyhjä assistentti-viesti johon streamataan teksti
           const assistantDiv = appendMessage('', 'assistant');
 
           sendBtn.disabled = true;
@@ -277,7 +346,6 @@ def index():
           }}
         }}
 
-        // Lähetä Ctrl+Enterillä
         promptInput.addEventListener('keydown', (e) => {{
           if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {{
             e.preventDefault();
@@ -301,8 +369,18 @@ def power(action: str = Form(...)):
 def chat_stream(model: str = Form(...), prompt: str = Form(...)):
     """
     Streamaa Ollaman vastauksen selaimelle token- / chunk-kerrallaan.
+    Huolehtii myös siitä, että LLM-palvelin herätetään tarvittaessa.
     """
+    _touch_activity()
+
     def generate():
+        # Jos LLM ei ole ylhäällä, kerro käyttäjälle ja käynnistä
+        if not llm_server_up():
+            yield "Herätetään LLM-palvelinta, odota hetki...\n"
+            if not ensure_llm_running():
+                yield "Virhe: LLM-palvelinta ei saatu käynnistettyä.\n"
+                return
+
         url = f"http://{LLM_HOST}:{LLM_PORT}/api/generate"
         payload = {
             "model": model,
@@ -320,8 +398,25 @@ def chat_stream(model: str = Form(...), prompt: str = Form(...)):
                     continue
                 chunk = data.get("response", "")
                 if chunk:
+                    _touch_activity()
                     yield chunk
                 if data.get("done"):
                     break
 
     return StreamingResponse(generate(), media_type="text/plain")
+
+
+# Yksinkertaiset API-pisteet VS Code / skriptejä varten
+
+@app.post("/api/wake_llm")
+def api_wake_llm():
+    ok = ensure_llm_running()
+    if ok:
+        _touch_activity()
+    return {"ok": ok, "up": llm_server_up()}
+
+
+@app.post("/api/shutdown_llm")
+def api_shutdown_llm():
+    msg = lo100_power("soft")
+    return {"message": msg}
