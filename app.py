@@ -83,57 +83,102 @@ def lo100_power(action: str) -> str:
 def get_lo100_health_and_temp():
     """
     Palauttaa (system_health, cpu_temp) LO100:n sensoreista.
-    system_health: esim. 'ok', 'critical', tms. tai None
-    cpu_temp: esim. '42 degrees C' tai None
+    system_health: 'ok', 'warning', 'critical' tai 'unknown'
+    cpu_temp: esim. '30.0 °C' tai None
     """
-    
     cpu_temp = None
     worst_level = 0  # 0=unknown, 1=ok, 2=warning, 3=critical
+
     cmd = [
         "ipmitool",
         "-I", "lanplus",
         "-H", LO100_IP,
         "-U", LO100_USER,
         "-P", LO100_PASS,
-        "sensor"
+        "sensor",
     ]
+
     try:
         out = subprocess.check_output(cmd, text=True, timeout=5)
-        for line in out.splitlines():
-            parts = [p.strip() for p in line.split("|")]
-            if len(parts) < 3:
-                continue
-
-            name = parts[0]
-            reading = parts[1]
-            status = parts[2].lower()
-
-            # poimi CPU0 Dmn0 Temp
-            if "cpu0 dmn0 temp" in name.lower():
-                cpu_temp = reading  # esim. "30 deg. C"
-
-            # tulkitaan statuksen "vakavuus"
-            level = 0
-            if any(word in status for word in ["critical", "non-recoverable", "unrecoverable", "nr", "cr", "fail", "fault"]):
-                level = 3
-            elif any(word in status for word in ["warning", "non-critical", "nc", "unavailable"]):
-                level = 2
-            elif (
-                status.startswith("ok")
-                or "normal operating range" in status
-                or "state deasserted" in status
-            ):
-                level = 1
-
-            if level > worst_level:
-                worst_level = level
-
     except Exception:
-        # jos ipmitool epäonnistuu, palautetaan None,None
-        return None, cpu_temp
+        return "unknown", cpu_temp
+
+    for line in out.splitlines():
+        # ohita mahdolliset virherivit
+        if not line.strip():
+            continue
+        if line.startswith("Get HPM.x Capabilities"):
+            continue
+
+        parts = [p.strip() for p in line.split("|")]
+        # Nimi | Lukema | Yksikkö | Status | ...
+        if len(parts) < 4:
+            continue
+
+        name = parts[0]
+        reading = parts[1]
+        units = parts[2]
+        status = parts[3].lower()
+
+        name_l = name.lower()
+        reading_l = reading.lower()
+        units_l = units.lower()
+
+        # Poimi CPU0 Dmn0 Temp
+        if "cpu0 dmn0 temp" in name_l and reading_l not in ("na", "unavailable"):
+            if "degrees" in units_l and reading.replace(".", "", 1).isdigit():
+                try:
+                    temp_val = float(reading)
+                    cpu_temp = f"{temp_val:.1f} °C"
+                except ValueError:
+                    cpu_temp = f"{reading} {units}"
+            else:
+                cpu_temp = f"{reading} {units}"
+
+        # --- System health -luokittelu ---
+
+        # Jos lukema/status on "na"/"unavailable" → ei vaikutusta healthiin
+        if reading_l in ("na", "unavailable"):
+            continue
+        if status in ("na", "ns", "n/a", "unavailable"):
+            continue
+
+        # Discrete-sensorien heksakoodit (0x0180, 0x0080 jne.) → ohitetaan
+        # jotta esim. Therm-Trip0 / Chassis / ACPI State ei turhaan pudota healthia.
+        if status.startswith("0x"):
+            continue
+
+        level = 0
+
+        # Pahat tilat
+        if any(word in status for word in [
+            "critical",
+            "non-recoverable",
+            "unrecoverable",
+            "fail",
+            "fault",
+        ]):
+            level = 3
+
+        # Varoitukset
+        elif any(word in status for word in [
+            "warning",
+            "non-critical",
+        ]):
+            level = 2
+
+        # Normaali tilanne
+        elif (
+            status.startswith("ok")
+            or "normal operating range" in status
+        ):
+            level = 1
+
+        if level > worst_level:
+            worst_level = level
 
     if worst_level == 0:
-        health = None
+        health = "unknown"
     elif worst_level == 1:
         health = "ok"
     elif worst_level == 2:
@@ -142,6 +187,7 @@ def get_lo100_health_and_temp():
         health = "critical"
 
     return health, cpu_temp
+
 
 
 def get_models():
