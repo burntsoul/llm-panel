@@ -304,11 +304,11 @@ def chat_stream(model: str = Form(...), prompt: str = Form(...)):
     """
     def generate():
         url = f"http://{LLM_HOST}:{LLM_PORT}/api/generate"
-        payload = {{
+        payload = {
             "model": model,
             "prompt": prompt,
             "stream": True
-        }}
+        }
         with requests.post(url, json=payload, stream=True, timeout=600) as r:
             r.raise_for_status()
             for line in r.iter_lines():
