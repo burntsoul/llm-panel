@@ -41,6 +41,7 @@ Here’s a suggested roadmap with both near-term and long-term ideas.
 
 6. **Chat user experience improvement**
    * Longer responses (noted when reply cut after ~300 words)
+   * Ability to stop response generation
     
 
 ### 5.2 Medium-term (features)
