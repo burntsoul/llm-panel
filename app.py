@@ -18,6 +18,13 @@ LO100_PASS = os.getenv("LO100_PASS", "Azcxn669")
 LLM_HOST = os.getenv("LLM_HOST", "192.168.8.31")  # llm-serverin IP
 LLM_PORT = int(os.getenv("LLM_PORT", "11434"))
 
+GLANCES_API_BASE = f"http://{LLM_HOST}:61208/api/3"
+
+# Kuorma, jota suurempana tulkitaan "LLM on käytössä" (idle-timer nollataan)
+CPU_BUSY_THRESHOLD_FOR_IDLE = float(os.getenv("CPU_BUSY_THRESHOLD_FOR_IDLE", "20"))  # %
+CPU_POLL_INTERVAL_SECONDS = float(os.getenv("CPU_POLL_INTERVAL_SECONDS", "10"))      # s
+
+
 # Kuinka kauan odotetaan käynnistyvää LLM-palvelinta (sekunteina)
 LLM_BOOT_TIMEOUT = int(os.getenv("LLM_BOOT_TIMEOUT", "180"))
 LLM_POLL_INTERVAL = float(os.getenv("LLM_POLL_INTERVAL", "5"))
@@ -203,6 +210,32 @@ def get_lo100_health_and_temp():
 
     return health, cpu_temp
 
+def get_llm_server_cpu_total():
+    """
+    Palauttaa llm-serverin kokonais-CPU-käytön prosentteina (0-100),
+    tai None jos lukemaa ei saatu.
+    """
+    try:
+        resp = requests.get(f"{GLANCES_API_BASE}/cpu", timeout=1.0)
+        resp.raise_for_status()
+        data = resp.json()
+        total = data.get("total")
+        if total is None:
+            return None
+        return float(total)
+    except Exception:
+        return None
+
+
+def is_llm_server_busy(threshold: float = CPU_BUSY_THRESHOLD_FOR_IDLE) -> bool:
+    """
+    Palauttaa True jos llm-serverin CPU-kuorma ylittää threshold-%.
+    Virhetilanteessa palauttaa True (fail safe, ei sammuteta sokkona).
+    """
+    total = get_llm_server_cpu_total()
+    if total is None:
+        return True
+    return total >= threshold
 
 
 def get_models():
@@ -262,12 +295,31 @@ async def idle_shutdown_loop():
             # Jos haluat varmistaa, että se oikeasti menee kiinni,
             # tänne voisi halutessa lisätä vielä odottelua ja tarvittaessa "off".
 
+async def cpu_activity_poller():
+    """
+    Pollaa llm-serverin CPU-kuormaa säännöllisesti ja
+    kutsuu _touch_activity(), jos kuorma on selvästi ei-idle.
+    Näin idle_shutdown_loop ei laukea, kun LLM:ää käytetään
+    suoraan esimerkiksi VS Codesta.
+    """
+    while True:
+        try:
+            # get_llm_server_cpu_total käyttää requestsia → ajetaan säikeessä
+            total = await asyncio.to_thread(get_llm_server_cpu_total)
+            if total is not None and total >= CPU_BUSY_THRESHOLD_FOR_IDLE:
+                _touch_activity()
+        except Exception:
+            # ei kaadeta polleria yksittäiseen virheeseen
+            pass
+
+        await asyncio.sleep(CPU_POLL_INTERVAL_SECONDS)
 
 @app.on_event("startup")
 async def _startup():
     # Käynnistä idle-shutdown -looppi taustalle
     asyncio.create_task(idle_shutdown_loop())
-
+    # Käynnistä CPU-aktiviteetin polleri
+    asyncio.create_task(cpu_activity_poller())
 
 @app.get("/", response_class=HTMLResponse)
 def index():
@@ -614,6 +666,12 @@ def index():
 
 @app.post("/power", response_class=HTMLResponse)
 def power(action: str = Form(...)):
+    # Estä soft/hard OFF jos LLM-serverillä on selvästi kuormaa
+    if action in ("off", "soft"):
+        if is_llm_server_busy():
+            msg = "LLM-palvelin näyttää olevan käytössä (CPU-kuorma korkea), sammutusta ei suoritettu."
+            return f"<html><body><p>{msg}</p><p><a href='/'>Takaisin</a></p></body></html>"
+
     msg = lo100_power(action)
     return f"<html><body><p>Komento: {action} → {msg}</p><p><a href='/'>Takaisin</a></p></body></html>"
 
