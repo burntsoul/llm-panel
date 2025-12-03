@@ -30,7 +30,7 @@ LLM_BOOT_TIMEOUT = int(os.getenv("LLM_BOOT_TIMEOUT", "180"))
 LLM_POLL_INTERVAL = float(os.getenv("LLM_POLL_INTERVAL", "5"))
 
 # Kuinka kauan ilman käyttöä ennen automaattista sammutusta (sekunteina)
-LLM_IDLE_SECONDS = int(os.getenv("LLM_IDLE_SECONDS", "1800"))  # esim. 30 min
+LLM_IDLE_SECONDS = int(os.getenv("LLM_IDLE_SECONDS", "3600"))  # esim. 30 min
 
 # Mitkä mallit näkyvissä, vaikka palvelin olisi sammuksissa
 DEFAULT_MODELS = os.getenv(
@@ -119,7 +119,7 @@ def get_lo100_health_and_temp():
         out = subprocess.check_output(
             cmd,
             text=True,
-            timeout=5,
+            timeout=15,
             stderr=subprocess.DEVNULL,  # vaimennetaan ipmitoolin virheilmoitukset
         )
     except Exception:
@@ -698,7 +698,7 @@ def chat_stream(model: str = Form(...), prompt: str = Form(...)):
             "prompt": prompt,
             "stream": True
         }
-        with requests.post(url, json=payload, stream=True, timeout=600) as r:
+        with requests.post(url, json=payload, stream=True, timeout=1200) as r:
             r.raise_for_status()
             for line in r.iter_lines():
                 if not line:
