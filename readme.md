@@ -374,6 +374,8 @@ Registered via `@app.on_event("startup")`:
     uvicorn app:app --host 0.0.0.0 --port 8000
     ```
   * Or as a systemd service (recommended) with environment variables set.
+    systemd service is in use
+      * Restart service with command 'sudo systemctl restart llm-agent'
 
 * **Network**:
 
