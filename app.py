@@ -810,17 +810,20 @@ async def list_models():
     ]
     return {"object": "list", "data": models}
 
+LLM_SERVER_BASE = f"{LLM_HOST}:{LLM_PORT}"  # MUUTA oikeaksi
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
-    """
-    Varsinainen proxy: herättää serverin ja välittää pyynnön eteenpäin.
-    """
-    # Luetaan alkuperäinen body sellaisenaan
+    # Luetaan alkuperäinen body ja päätellään, onko stream pyydetty
     body_bytes = await request.body()
-    headers = dict(request.headers)
+    try:
+        body = json.loads(body_bytes.decode("utf-8"))
+    except Exception:
+        body = {}
 
-    # 1) Varmista että llm-server on pystyssä
+    stream = bool(body.get("stream", False))
+
+    # 1) Varmistetaan, että llm-server on hereillä
     ready = await ensure_llm_running_and_ready()
     if not ready:
         return JSONResponse(
@@ -828,15 +831,45 @@ async def chat_completions(request: Request):
             content={"error": {"message": "LLM server not available", "type": "server_error"}},
         )
 
-    # 2) Proxy eteenpäin llm-serverille
-    upstream_url = f"{LLM_HOST}:{LLM_PORT}/v1/chat/completions"
+    upstream_url = f"{LLM_SERVER_BASE}/v1/chat/completions"
 
-    # Jos et käytä streamausta, tämä riittää:
+    # 2) Proxy eteenpäin
     async with httpx.AsyncClient(timeout=None) as client:
-        resp = await client.post(
-            upstream_url,
-            content=body_bytes,
-            headers={"Content-Type": headers.get("content-type", "application/json")},
-        )
+        headers = {"Content-Type": "application/json"}
 
-    return JSONResponse(status_code=resp.status_code, content=resp.json())
+        if stream:
+            # Streamaava vastaus → välitetään bytenä läpi sellaisenaan
+            upstream_resp = await client.stream(
+                "POST",
+                upstream_url,
+                content=body_bytes,
+                headers=headers,
+            )
+
+            async def event_generator():
+                async for chunk in upstream_resp.aiter_bytes():
+                    # chunk sisältää valmiiksi SSE-rivit ("data: {...}\n\n")
+                    yield chunk
+
+            return StreamingResponse(
+                event_generator(),
+                status_code=upstream_resp.status_code,
+                media_type=upstream_resp.headers.get("content-type", "text/event-stream"),
+            )
+        else:
+            # Ei streamausta → perinteinen JSON-vastaus
+            upstream_resp = await client.post(
+                upstream_url,
+                content=body_bytes,
+                headers=headers,
+            )
+            # Jos llm-server palauttaa virheen, välitetään sellaisenaan
+            try:
+                data = upstream_resp.json()
+            except Exception:
+                return JSONResponse(
+                    status_code=502,
+                    content={"error": {"message": "Invalid response from upstream", "type": "bad_gateway"}},
+                )
+
+            return JSONResponse(status_code=upstream_resp.status_code, content=data)
