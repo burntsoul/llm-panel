@@ -778,9 +778,33 @@ async def list_models():
     """
     models = [
         {
-            "id": "qwen2.5-coder-32b",
+            "id": "qwen3-vl:8b",
             "object": "model",
             "created": 1730000000,
+            "owned_by": "llm-server",
+        },
+        {
+            "id": "qwen3-coder:30b",
+            "object": "model",
+            "created": 1730000001,
+            "owned_by": "llm-server",
+        },
+        {
+            "id": "deepseek-coder:6.7b-16k:latest",
+            "object": "model",
+            "created": 1730000002,
+            "owned_by": "llm-server",
+        },        
+        {
+            "id": "deepseek-coder-v2:16b",
+            "object": "model",
+            "created": 1730000003,
+            "owned_by": "llm-server",
+        },        
+        {
+            "id": "deepseek-r1:8b",
+            "object": "model",
+            "created": 1730000004,
             "owned_by": "llm-server",
         },
         # lisää tänne niitä malleja, joita aiot käyttää
