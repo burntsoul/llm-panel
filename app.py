@@ -783,6 +783,12 @@ async def list_models():
             "owned_by": "llm-server",
         },
         {
+            "id": "qwen3-vl:235b-cloud",
+            "object": "model",
+            "created": 1730000000,
+            "owned_by": "llm-server",
+        },
+        {
             "id": "qwen3-coder:30b",
             "object": "model",
             "created": 1730000001,
@@ -804,6 +810,24 @@ async def list_models():
             "id": "deepseek-r1:8b",
             "object": "model",
             "created": 1730000004,
+            "owned_by": "llm-server",
+        },
+        {
+            "id": "deepseek-coder:6.7",
+            "object": "model",
+            "created": 1730000000,
+            "owned_by": "llm-server",
+        },
+        {
+            "id": "deepseek-coder:1.3b",
+            "object": "model",
+            "created": 1730000000,
+            "owned_by": "llm-server",
+        },
+        {
+            "id": "llama3.2:latest",
+            "object": "model",
+            "created": 1730000000,
             "owned_by": "llm-server",
         },
         # lisää tänne niitä malleja, joita aiot käyttää
