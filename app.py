@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Form
+from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 import subprocess
 import requests
@@ -814,7 +814,7 @@ LLM_SERVER_BASE = f"{LLM_HOST}:{LLM_PORT}"  # MUUTA oikeaksi
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
-    # Luetaan alkuperäinen body ja päätellään, onko stream pyydetty
+    # Luetaan alkuperäinen body sellaisenaan
     body_bytes = await request.body()
     try:
         body = json.loads(body_bytes.decode("utf-8"))
@@ -828,48 +828,55 @@ async def chat_completions(request: Request):
     if not ready:
         return JSONResponse(
             status_code=503,
-            content={"error": {"message": "LLM server not available", "type": "server_error"}},
+            content={
+                "error": {
+                    "message": "LLM server not available",
+                    "type": "server_error",
+                }
+            },
         )
 
     upstream_url = f"{LLM_SERVER_BASE}/v1/chat/completions"
+    headers = {"Content-Type": "application/json"}
 
-    # 2) Proxy eteenpäin
+    # 2) Jos pyydetään streamausta → välitetään SSE-stream läpi
+    if stream:
+        async def stream_from_upstream():
+            async with httpx.AsyncClient(timeout=None) as client:
+                async with client.stream(
+                    "POST",
+                    upstream_url,
+                    content=body_bytes,
+                    headers=headers,
+                ) as upstream_resp:
+                    async for chunk in upstream_resp.aiter_bytes():
+                        # chunk sisältää valmiiksi "data: ...\n\n" -tyyppisiä rivejä
+                        yield chunk
+
+        return StreamingResponse(
+            stream_from_upstream(),
+            media_type="text/event-stream",
+        )
+
+    # 3) Ei streamausta → tavallinen JSON-proxy
     async with httpx.AsyncClient(timeout=None) as client:
-        headers = {"Content-Type": "application/json"}
+        upstream_resp = await client.post(
+            upstream_url,
+            content=body_bytes,
+            headers=headers,
+        )
 
-        if stream:
-            # Streamaava vastaus → välitetään bytenä läpi sellaisenaan
-            upstream_resp = await client.stream(
-                "POST",
-                upstream_url,
-                content=body_bytes,
-                headers=headers,
-            )
+    try:
+        data = upstream_resp.json()
+    except Exception:
+        return JSONResponse(
+            status_code=502,
+            content={
+                "error": {
+                    "message": "Invalid response from upstream",
+                    "type": "bad_gateway",
+                }
+            },
+        )
 
-            async def event_generator():
-                async for chunk in upstream_resp.aiter_bytes():
-                    # chunk sisältää valmiiksi SSE-rivit ("data: {...}\n\n")
-                    yield chunk
-
-            return StreamingResponse(
-                event_generator(),
-                status_code=upstream_resp.status_code,
-                media_type=upstream_resp.headers.get("content-type", "text/event-stream"),
-            )
-        else:
-            # Ei streamausta → perinteinen JSON-vastaus
-            upstream_resp = await client.post(
-                upstream_url,
-                content=body_bytes,
-                headers=headers,
-            )
-            # Jos llm-server palauttaa virheen, välitetään sellaisenaan
-            try:
-                data = upstream_resp.json()
-            except Exception:
-                return JSONResponse(
-                    status_code=502,
-                    content={"error": {"message": "Invalid response from upstream", "type": "bad_gateway"}},
-                )
-
-            return JSONResponse(status_code=upstream_resp.status_code, content=data)
+    return JSONResponse(status_code=upstream_resp.status_code, content=data)
