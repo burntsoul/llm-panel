@@ -810,7 +810,7 @@ async def list_models():
     ]
     return {"object": "list", "data": models}
 
-LLM_SERVER_BASE = f"{LLM_HOST}:{LLM_PORT}"  # MUUTA oikeaksi
+LLM_SERVER_BASE = f"http://{LLM_HOST}:{LLM_PORT}"  # MUUTA oikeaksi
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
