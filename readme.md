@@ -341,6 +341,9 @@ Registered via `@app.on_event("startup")`:
      * Remote management interface configured with a static IP.
      * `ipmitool` installed on the **agent VM**, not necessarily on the server.
 
+  4. **Docker**
+     * open-webui -p3000:8080
+
 * **Firewall**:
 
   * Allow from trusted LAN only:

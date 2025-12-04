@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Form
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 import subprocess
 import requests
 import os
@@ -7,6 +7,9 @@ import json
 import time
 import datetime
 import asyncio
+import httpx
+from fastapi.requests import Request
+
 
 app = FastAPI()
 
@@ -743,3 +746,74 @@ def api_status():
         "system_health": health,
         "cpu_temp": cpu_temp,
     }
+
+# Voit halutessasi tehdä tästä async-version:
+async def ensure_llm_running_and_ready(timeout: int = 180) -> bool:
+    loop = asyncio.get_running_loop()
+    start = loop.time()
+
+    # 1) Käynnistä (sync-funktio ajettu threadissa)
+    ok = await loop.run_in_executor(None, ensure_llm_running)
+    if not ok:
+        return False
+
+    # 2) Odota että llm_server_up() on True
+    while loop.time() - start < timeout:
+        up = await loop.run_in_executor(None, llm_server_up)
+        if up:
+            _touch_activity()
+            return True
+        await asyncio.sleep(3)
+
+    return False
+
+# --- OpenAI-yhteensopivat endpointit ---
+
+
+@app.get("/v1/models")
+async def list_models():
+    """
+    Palautetaan staattinen lista malleista.
+    Näin WebUI näkee mallit vaikka llm-server olisi kiinni.
+    """
+    models = [
+        {
+            "id": "qwen2.5-coder-32b",
+            "object": "model",
+            "created": 1730000000,
+            "owned_by": "llm-server",
+        },
+        # lisää tänne niitä malleja, joita aiot käyttää
+    ]
+    return {"object": "list", "data": models}
+
+
+@app.post("/v1/chat/completions")
+async def chat_completions(request: Request):
+    """
+    Varsinainen proxy: herättää serverin ja välittää pyynnön eteenpäin.
+    """
+    # Luetaan alkuperäinen body sellaisenaan
+    body_bytes = await request.body()
+    headers = dict(request.headers)
+
+    # 1) Varmista että llm-server on pystyssä
+    ready = await ensure_llm_running_and_ready()
+    if not ready:
+        return JSONResponse(
+            status_code=503,
+            content={"error": {"message": "LLM server not available", "type": "server_error"}},
+        )
+
+    # 2) Proxy eteenpäin llm-serverille
+    upstream_url = f"{LLM_HOST}:{LLM_PORT}/v1/chat/completions"
+
+    # Jos et käytä streamausta, tämä riittää:
+    async with httpx.AsyncClient(timeout=None) as client:
+        resp = await client.post(
+            upstream_url,
+            content=body_bytes,
+            headers={"Content-Type": headers.get("content-type", "application/json")},
+        )
+
+    return JSONResponse(status_code=resp.status_code, content=resp.json())
