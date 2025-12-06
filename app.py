@@ -813,7 +813,7 @@ async def list_models():
             "owned_by": "llm-server",
         },
         {
-            "id": "deepseek-coder:6.7",
+            "id": "deepseek-coder:6.7b",
             "object": "model",
             "created": 1730000000,
             "owned_by": "llm-server",
