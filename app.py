@@ -777,7 +777,7 @@ async def list_models():
     """
     models = [
         {
-            "id": "qwen3-vl:8b",
+            "id": "qwen3-vl:8b", # Ladattu
             "object": "model",
             "created": 1730000000,
             "owned_by": "llm-server",
@@ -793,13 +793,7 @@ async def list_models():
             "object": "model",
             "created": 1730000001,
             "owned_by": "llm-server",
-        },
-        {
-            "id": "deepseek-coder:6.7b-16k:latest",
-            "object": "model",
-            "created": 1730000002,
-            "owned_by": "llm-server",
-        },        
+        },  
         {
             "id": "deepseek-coder-v2:16b",
             "object": "model",
