@@ -18,7 +18,7 @@ LO100_IP = os.getenv("LO100_IP", "192.168.8.33")
 LO100_USER = os.getenv("LO100_USER", "admin")
 LO100_PASS = os.getenv("LO100_PASS", "Azcxn669")
 
-LLM_HOST = os.getenv("LLM_HOST", "192.168.8.31")  # llm-serverin IP
+LLM_HOST = os.getenv("LLM_HOST", "192.168.8.34")  # llm-serverin IP
 LLM_PORT = int(os.getenv("LLM_PORT", "11434"))
 
 GLANCES_API_BASE = f"http://{LLM_HOST}:61208/api/3"
