@@ -1,0 +1,34 @@
+{
+  "qwen3-vl:8b": {
+    "source": "local",
+    "device": "cpu"
+  },
+  "qwen3-vl:235b-cloud": {
+    "source": "cloud",
+    "device": "cloud"
+  },
+  "qwen3-coder:30b": {
+    "source": "local",
+    "device": "gpu"
+  },
+  "deepseek-coder-v2:16b": {
+    "source": "local",
+    "device": "gpu"
+  },
+  "deepseek-r1:8b": {
+    "source": "local",
+    "device": "cpu"
+  },
+  "deepseek-coder:6.7b": {
+    "source": "local",
+    "device": "cpu"
+  },
+  "deepseek-coder:1.3b": {
+    "source": "local",
+    "device": "cpu"
+  },
+  "llama3.2:latest": {
+    "source": "local",
+    "device": "cpu"
+  }
+}

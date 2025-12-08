@@ -16,7 +16,7 @@ from llm_server import (
     cpu_activity_poller,
     touch_activity,
 )
-from models import get_model_names, get_models_openai_format
+from models import get_model_display_entries, get_models_openai_format
 
 app = FastAPI()
 
@@ -32,9 +32,9 @@ async def _startup():
 def index():
     up = llm_server_up()
     power = lo100_power_status()
-    models = get_model_names()
+    entries = get_model_display_entries()
     html_models = "".join(
-        f'<option value="{m}">{m}</option>' for m in models
+        f'<option value="{e["id"]}">{e["label"]}</option>' for e in entries
     )
 
     if not html_models:

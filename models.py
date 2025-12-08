@@ -1,5 +1,7 @@
 # models.py
 import time
+import os
+import json
 from typing import List, Dict, Any, Optional
 
 import requests
@@ -8,11 +10,40 @@ from config import settings
 from llm_server import llm_server_up
 
 # Kuinka kauan cache on voimassa (sekunteina)
-_CACHE_TTL = 300.0  # 5 min, muuta halutessasi
-
+_CACHE_TTL = 300.0  # 5 min
 
 _cached_models_raw: Optional[List[Dict[str, Any]]] = None
 _cached_at: float = 0.0
+
+# Malli-metadatan sijainti (voit vaihtaa polkua env-muuttujalla MODEL_META_PATH)
+_MODEL_META_FILE = os.getenv("MODEL_META_PATH", "model_meta.json")
+_model_meta_cache: Optional[Dict[str, Dict[str, Any]]] = None
+
+
+def _load_meta() -> Dict[str, Dict[str, Any]]:
+    """
+    Lukee model_meta.json -tiedoston (tai muuta polkua, jos MODEL_META_PATH asetettu)
+    ja palauttaa sanakirjan:
+      { "model_name": { ...meta... }, ... }
+
+    Virhetilanteessa palauttaa tyhjän dictin.
+    """
+    global _model_meta_cache
+    if _model_meta_cache is not None:
+        return _model_meta_cache
+
+    try:
+        if os.path.exists(_MODEL_META_FILE):
+            with open(_MODEL_META_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    _model_meta_cache = data
+                    return data
+    except Exception:
+        pass
+
+    _model_meta_cache = {}
+    return _model_meta_cache
 
 
 def _fetch_from_ollama() -> Optional[List[Dict[str, Any]]]:
@@ -69,7 +100,7 @@ def _get_raw_models() -> List[Dict[str, Any]]:
 def get_model_names() -> List[str]:
     """
     Palauttaa pelkät malli-id:t (esim. 'deepseek-coder:1.3b').
-    Soveltuu HTML-dropdownille.
+    (Käytettävissä jos halutaan vain string-lista.)
     """
     return [
         m.get("name", "")
@@ -78,26 +109,145 @@ def get_model_names() -> List[str]:
     ]
 
 
+def _badge_for_meta(source: str, device: str) -> str:
+    """
+    Rakentaa pienen 'badgen' meta-tietojen perusteella.
+    """
+    source = (source or "").lower()
+    device = (device or "").lower()
+
+    if source == "cloud":
+        return "☁️ cloud"
+    if device == "gpu":
+        return "🟢 GPU-local"
+    # oletus
+    return "💻 CPU-local"
+
+
+def get_model_display_entries() -> List[Dict[str, Any]]:
+    """
+    Palauttaa listan sanakirjoja llm-panelin UI:lle:
+
+    [
+      {
+        "id": "deepseek-coder:6.7b",
+        "label": "deepseek-coder:6.7b (💻 CPU-local)",
+        "source": "local",
+        "device": "cpu",
+      },
+      ...
+    ]
+    """
+    raw = _get_raw_models()
+    meta_map = _load_meta()
+
+    entries: List[Dict[str, Any]] = []
+
+    for m in raw:
+        name = m.get("name")
+        if not name:
+            continue
+
+        meta = meta_map.get(name, {})
+        source = meta.get("source", "local")
+        device = meta.get("device", "cpu")
+
+        badge = _badge_for_meta(source, device)
+        label = f"{name} ({badge})"
+
+        entries.append(
+            {
+                "id": name,
+                "label": label,
+                "source": source,
+                "device": device,
+            }
+        )
+
+    # Jos jostain syystä lista tyhjä → fallback DEFAULT_MODELS
+    if not entries:
+        for name in settings.DEFAULT_MODELS:
+            name = name.strip()
+            if not name:
+                continue
+            meta = meta_map.get(name, {})
+            source = meta.get("source", "local")
+            device = meta.get("device", "cpu")
+            badge = _badge_for_meta(source, device)
+            label = f"{name} ({badge})"
+            entries.append(
+                {
+                    "id": name,
+                    "label": label,
+                    "source": source,
+                    "device": device,
+                }
+            )
+
+    return entries
+
+
 def get_models_openai_format() -> List[Dict[str, Any]]:
     """
     Palauttaa mallilistan OpenAI-yhteensopivassa muodossa
     /v1/models -endpointtia varten.
+
+    Mukaan lisätään myös "metadata": { source, device } ja "description".
     """
     result: List[Dict[str, Any]] = []
     raw = _get_raw_models()
+    meta_map = _load_meta()
     base_ts = 1730000000
 
     for idx, m in enumerate(raw):
         name = m.get("name")
         if not name:
             continue
+
+        meta = meta_map.get(name, {})
+        source = meta.get("source", "local")
+        device = meta.get("device", "cpu")
+
+        badge = _badge_for_meta(source, device)
+        desc = f"{name} [{badge}]"
+
         result.append(
             {
                 "id": name,
                 "object": "model",
                 "created": base_ts + idx,
                 "owned_by": "llm-server",
+                "metadata": {
+                    "source": source,
+                    "device": device,
+                },
+                "description": desc,
             }
         )
+
+    # Jos jostain syystä tyhjä, fallback DEFAULT_MODELS
+    if not result:
+        for idx, name in enumerate(settings.DEFAULT_MODELS):
+            name = name.strip()
+            if not name:
+                continue
+            meta = meta_map.get(name, {})
+            source = meta.get("source", "local")
+            device = meta.get("device", "cpu")
+            badge = _badge_for_meta(source, device)
+            desc = f"{name} [{badge}]"
+            result.append(
+                {
+                    "id": name,
+                    "object": "model",
+                    "created": base_ts + idx,
+                    "owned_by": "llm-server",
+                    "metadata": {
+                        "source": source,
+                        "device": device,
+                    },
+                    "description": desc,
+                }
+            )
 
     return result
