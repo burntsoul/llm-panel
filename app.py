@@ -142,6 +142,50 @@ def index():
           opacity: 0.6;
           cursor: default;
         }}
+        .modal-overlay {{
+          position: fixed;
+          inset: 0;
+          background: rgba(15,23,42,0.45);
+          display: none;
+          align-items: center;
+          justify-content: center;
+          z-index: 1000;
+        }}
+        .modal-card {{
+          background: #ffffff;
+          border-radius: 12px;
+          padding: 1rem 1.25rem;
+          max-width: 900px;
+          width: 100%;
+          max-height: 80vh;
+          overflow-y: auto;
+          box-shadow: 0 10px 25px rgba(0,0,0,0.25);
+        }}
+        .modal-header {{
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 0.5rem;
+        }}
+        .modal-close {{
+          border: none;
+          background: transparent;
+          font-size: 1.2rem;
+          cursor: pointer;
+        }}
+        .link-button {{
+          border: none;
+          background: none;
+          padding: 0;
+          margin: 0;
+          color: #2563eb;
+          cursor: pointer;
+          font: inherit;
+        }}
+        .link-button:hover {{
+          text-decoration: underline;
+        }}
+
       </style>
 
       <!-- Markdown-renderöinti -->
@@ -161,7 +205,11 @@ def index():
     <body>
       <div class="card">
         <h1>LLM-palvelin</h1>
-        <p><a href="/models">Näytä mallilista ja tila</a></p>
+        <p>
+          <button class="link-button" type="button" onclick="openModelsModal()">
+            Näytä mallilista ja tila
+          </button>
+        </p>
         <p>LO100 virran tila: <b id="power-status">{power}</b></p>
         <p>LLM API:
           <span id="llm-api-status" class="{ 'status-ok' if up else 'status-bad' }">
@@ -177,12 +225,12 @@ def index():
           <span id="cpu-temp">-</span>
         </p>
 
-        <form method="post" action="/power" class="power-buttons">
-          <button name="action" value="on">Power ON</button>
-          <button name="action" value="soft">Soft shutdown</button>
-          <button name="action" value="off">Hard OFF</button>
-        </form>
-      </div>
+        <div class="power-buttons">
+          <button type="button" onclick="sendPower('on')">Power ON</button>
+          <button type="button" onclick="sendPower('soft')">Soft shutdown</button>
+          <button type="button" onclick="sendPower('off')">Hard OFF</button>
+        </div>
+
 
       <div class="card">
         <h2>Chat</h2>
@@ -203,12 +251,35 @@ def index():
         </div>
       </div>
 
+      <div id="modal-overlay" class="modal-overlay">
+        <div class="modal-card">
+          <div class="modal-header">
+            <h2 id="modal-title" style="margin:0;font-size:1.1rem;"></h2>
+            <button class="modal-close" onclick="closeModal()">×</button>
+          </div>
+          <div id="modal-body"></div>
+        </div>
+      </div>
+
+
       <script>
         const chatContainer = document.getElementById('chat-container');
         const promptInput = document.getElementById('prompt');
         const sendBtn = document.getElementById('send-btn');
         const statusLine = document.getElementById('status-line');
         const modelSelect = document.getElementById('model');
+        const modalOverlay = document.getElementById('modal-overlay');
+        const modalTitle = document.getElementById('modal-title');
+        const modalBody = document.getElementById('modal-body');
+
+        function openModal(title, bodyHtml) {{
+          if (modalTitle) modalTitle.textContent = title || '';
+          if (modalBody) modalBody.innerHTML = bodyHtml || '';
+          if (modalOverlay) modalOverlay.style.display = 'flex';
+        }}
+        function closeModal() {{
+          if (modalOverlay) modalOverlay.style.display = 'none';
+        }}
 
         function appendMessage(text, role) {{
           const div = document.createElement('div');
@@ -267,6 +338,98 @@ def index():
             console.warn('Status-päivitys epäonnistui:', e);
           }}
         }}
+
+        async function openModelsModal() {{
+          try {{
+            const resp = await fetch('/api/models');
+            if (!resp.ok) {{
+              throw new Error('HTTP ' + resp.status);
+            }}
+            const data = await resp.json();
+            const rows = data.models || [];
+
+            let html = `
+              <table style="border-collapse:collapse;width:100%;">
+                <thead>
+                  <tr>
+                    <th style="text-align:left;padding:4px 8px;border-bottom:1px solid #e5e7eb;">Model ID</th>
+                    <th style="text-align:left;padding:4px 8px;border-bottom:1px solid #e5e7eb;">Source</th>
+                    <th style="text-align:left;padding:4px 8px;border-bottom:1px solid #e5e7eb;">Device</th>
+                    <th style="text-align:left;padding:4px 8px;border-bottom:1px solid #e5e7eb;">Tilanne nyt</th>
+                    <th style="text-align:left;padding:4px 8px;border-bottom:1px solid #e5e7eb;">Label</th>
+                  </tr>
+                </thead>
+                <tbody>
+            `;
+
+            for (const r of rows) {{
+              let status;
+              if (r.present_now === true) status = '✅ Ollamassa';
+              else if (r.present_now === false) status = '❌ Ei Ollamassa';
+              else status = '❓ Tuntematon';
+
+              html += `
+                <tr>
+                  <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;">${{r.id}}</td>
+                  <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;">${{r.source}}</td>
+                  <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;">${{r.device}}</td>
+                  <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;">${{status}}</td>
+                  <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;">${{r.label}}</td>
+                </tr>
+              `;
+            }}
+
+            html += `
+                </tbody>
+              </table>
+            `;
+
+            openModal('Mallit ja tila', html);
+          }} catch (err) {{
+            openModal('Virhe', `<p>Mallilistan haku epäonnistui: ${{err}}</p>`);
+          }}
+        }}
+
+        async function sendPower(action) {{
+          try {{
+            openModal('Virta-komento', `<p>Lähetetään komentoa <b>${{action}}</b>...</p>`);
+
+            const formData = new FormData();
+            formData.append('action', action);
+
+            const resp = await fetch('/power_json', {{
+              method: 'POST',
+              body: formData
+            }});
+
+            if (!resp.ok) {{
+              throw new Error('HTTP ' + resp.status);
+            }}
+
+            const data = await resp.json();
+            const msg = data.message || '(ei viestiä)';
+            const powerNow = data.power || 'tuntematon';
+            const ok = data.ok === undefined ? true : !!data.ok;
+
+            let bodyHtml = `
+              <p>${{msg}}</p>
+              <p>Nykyinen virran tila: <b>${{powerNow}}</b></p>
+            `;
+
+            if (!ok) {{
+              bodyHtml += `<p style="color:#dc2626;font-size:0.9rem;">Komento ei ehkä toteutunut kokonaan.</p>`;
+            }}
+
+            openModal('Virta-komento', bodyHtml);
+
+            // Päivitä etusivun status
+            refreshStatus();
+          }} catch (err) {{
+            openModal('Virhe', `<p>Virta-komento epäonnistui: ${{err}}</p>`);
+          }}
+        }}
+
+
 
         // Päivitä status heti ja sitten 10 s välein
         window.addEventListener('load', () => {{
@@ -385,6 +548,32 @@ def power(action: str = Form(...)):
 
     msg = lo100_power(action)
     return f"<html><body><p>Komento: {action} → {msg}</p><p><a href='/'>Takaisin</a></p></body></html>"
+
+@app.post("/power_json")
+def power_json(action: str = Form(...)):
+    """
+    Sama logiikka kuin /power, mutta JSON-muodossa.
+    Tarkoitettu käytettäväksi UI:n modaalin kanssa.
+    """
+    # Estä soft/hard OFF jos LLM-serverillä on selvästi kuormaa
+    if action in ("off", "soft"):
+        if is_llm_server_busy():
+            msg = (
+                "LLM-palvelin näyttää olevan käytössä (CPU-kuorma korkea), "
+                "sammutusta ei suoritettu."
+            )
+            return {
+                "ok": False,
+                "message": msg,
+                "power": lo100_power_status(),
+            }
+
+    msg = lo100_power(action)
+    return {
+        "ok": True,
+        "message": msg,
+        "power": lo100_power_status(),
+    }
 
 
 @app.post("/chat_stream")
