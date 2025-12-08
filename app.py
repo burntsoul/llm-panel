@@ -2,47 +2,19 @@ from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 import subprocess
 import requests
-import os
 import json
 import time
 import datetime
 import asyncio
 import httpx
-from fastapi.requests import Request
+
+from config import settings
 
 
 app = FastAPI()
 
-# Konfiguraatio – voit muuttaa näitä .env:llä tai export-komennolla
-LO100_IP = os.getenv("LO100_IP", "192.168.8.33")
-LO100_USER = os.getenv("LO100_USER", "admin")
-LO100_PASS = os.getenv("LO100_PASS", "Azcxn669")
-
-LLM_HOST = os.getenv("LLM_HOST", "192.168.8.34")  # llm-serverin IP
-LLM_PORT = int(os.getenv("LLM_PORT", "11434"))
-
-GLANCES_API_BASE = f"http://{LLM_HOST}:61208/api/3"
-
-# Kuorma, jota suurempana tulkitaan "LLM on käytössä" (idle-timer nollataan)
-CPU_BUSY_THRESHOLD_FOR_IDLE = float(os.getenv("CPU_BUSY_THRESHOLD_FOR_IDLE", "20"))  # %
-CPU_POLL_INTERVAL_SECONDS = float(os.getenv("CPU_POLL_INTERVAL_SECONDS", "10"))      # s
-
-
-# Kuinka kauan odotetaan käynnistyvää LLM-palvelinta (sekunteina)
-LLM_BOOT_TIMEOUT = int(os.getenv("LLM_BOOT_TIMEOUT", "180"))
-LLM_POLL_INTERVAL = float(os.getenv("LLM_POLL_INTERVAL", "5"))
-
-# Kuinka kauan ilman käyttöä ennen automaattista sammutusta (sekunteina)
-LLM_IDLE_SECONDS = int(os.getenv("LLM_IDLE_SECONDS", "3600"))  # esim. 30 min
-
-# Mitkä mallit näkyvissä, vaikka palvelin olisi sammuksissa
-DEFAULT_MODELS = os.getenv(
-    "DEFAULT_MODELS",
-    "deepseek-coder:1.3b,deepseek-coder:6.7b"
-).split(",")
 
 _last_activity = datetime.datetime.utcnow()
-
 
 def _touch_activity():
     """Merkitse, että LLM:ää juuri käytettiin."""
@@ -53,7 +25,7 @@ def _touch_activity():
 def llm_server_up() -> bool:
     """Tarkista vastaako Ollama /api/tags:iin."""
     try:
-        r = requests.get(f"http://{LLM_HOST}:{LLM_PORT}/api/tags", timeout=1.5)
+        r = requests.get(f"http://{settings.LLM_HOST}:{settings.LLM_PORT}/api/tags", timeout=1.5)
         return r.ok
     except Exception:
         return False
@@ -63,9 +35,9 @@ def lo100_power_status() -> str:
     cmd = [
         "ipmitool",
         "-I", "lanplus",
-        "-H", LO100_IP,
-        "-U", LO100_USER,
-        "-P", LO100_PASS,
+        "-H", settings.LO100_IP,
+        "-U", settings.LO100_USER,
+        "-P", settings.LO100_PASS,
         "chassis", "power", "status",
     ]
     try:
@@ -84,9 +56,9 @@ def lo100_power(action: str) -> str:
     cmd = [
         "ipmitool",
         "-I", "lanplus",
-        "-H", LO100_IP,
-        "-U", LO100_USER,
-        "-P", LO100_PASS,
+        "-H", settings.LO100_IP,
+        "-U", settings.LO100_USER,
+        "-P", settings.LO100_PASS,
         "chassis", "power", action,
     ]
     try:
@@ -112,9 +84,9 @@ def get_lo100_health_and_temp():
     cmd = [
         "ipmitool",
         "-I", "lanplus",
-        "-H", LO100_IP,
-        "-U", LO100_USER,
-        "-P", LO100_PASS,
+        "-H", settings.LO100_IP,
+        "-U", settings.LO100_USER,
+        "-P", settings.LO100_PASS,
         "sensor",
     ]
 
@@ -219,7 +191,7 @@ def get_llm_server_cpu_total():
     tai None jos lukemaa ei saatu.
     """
     try:
-        resp = requests.get(f"{GLANCES_API_BASE}/cpu", timeout=1.0)
+        resp = requests.get(f"{settings.GLANCES_API_BASE}/cpu", timeout=1.0)
         resp.raise_for_status()
         data = resp.json()
         total = data.get("total")
@@ -230,21 +202,21 @@ def get_llm_server_cpu_total():
         return None
 
 
-def is_llm_server_busy(threshold: float = CPU_BUSY_THRESHOLD_FOR_IDLE) -> bool:
-    """
-    Palauttaa True jos llm-serverin CPU-kuorma ylittää threshold-%.
-    Virhetilanteessa palauttaa True (fail safe, ei sammuteta sokkona).
-    """
+def is_llm_server_busy(threshold: float | None = None) -> bool:
+    if threshold is None:
+        threshold = settings.CPU_BUSY_THRESHOLD_FOR_IDLE
+
     total = get_llm_server_cpu_total()
     if total is None:
         return True
     return total >= threshold
 
 
+
 def get_models():
     models = []
     try:
-        r = requests.get(f"http://{LLM_HOST}:{LLM_PORT}/api/tags", timeout=2)
+        r = requests.get(f"http://{settings.LLM_HOST}:{settings.LLM_PORT}/api/tags", timeout=2)
         r.raise_for_status()
         data = r.json()
         models = [m["name"] for m in data.get("models", [])]
@@ -253,7 +225,7 @@ def get_models():
         pass
 
     if not models:
-        models = [m.strip() for m in DEFAULT_MODELS if m.strip()]
+        models = [m.strip() for m in settings.DEFAULT_MODELS if m.strip()]
 
     return models
 
@@ -271,11 +243,11 @@ def ensure_llm_running() -> bool:
     # Käynnistä palvelin LO100:n kautta
     lo100_power("on")
 
-    deadline = time.time() + LLM_BOOT_TIMEOUT
+    deadline = time.time() + settings.LLM_BOOT_TIMEOUT
     while time.time() < deadline:
         if llm_server_up():
             return True
-        time.sleep(LLM_POLL_INTERVAL)
+        time.sleep(settings.LLM_POLL_INTERVAL)
 
     # Viimeinen tarkistus
     return llm_server_up()
@@ -292,7 +264,7 @@ async def idle_shutdown_loop():
         if not llm_server_up():
             continue
         idle = (datetime.datetime.utcnow() - _last_activity).total_seconds()
-        if idle > LLM_IDLE_SECONDS:
+        if idle > settings.LLM_IDLE_SECONDS:
             # Yritä ensin soft shutdown
             lo100_power("soft")
             # Jos haluat varmistaa, että se oikeasti menee kiinni,
@@ -309,13 +281,13 @@ async def cpu_activity_poller():
         try:
             # get_llm_server_cpu_total käyttää requestsia → ajetaan säikeessä
             total = await asyncio.to_thread(get_llm_server_cpu_total)
-            if total is not None and total >= CPU_BUSY_THRESHOLD_FOR_IDLE:
+            if total is not None and total >= settings.CPU_BUSY_THRESHOLD_FOR_IDLE:
                 _touch_activity()
         except Exception:
             # ei kaadeta polleria yksittäiseen virheeseen
             pass
 
-        await asyncio.sleep(CPU_POLL_INTERVAL_SECONDS)
+        await asyncio.sleep(settings.CPU_POLL_INTERVAL_SECONDS)
 
 @app.on_event("startup")
 async def _startup():
@@ -695,7 +667,7 @@ def chat_stream(model: str = Form(...), prompt: str = Form(...)):
                 yield "Virhe: LLM-palvelinta ei saatu käynnistettyä.\n"
                 return
 
-        url = f"http://{LLM_HOST}:{LLM_PORT}/api/generate"
+        url = f"http://{settings.LLM_HOST}:{settings.LLM_PORT}/api/generate"
         payload = {
             "model": model,
             "prompt": prompt,
@@ -828,8 +800,6 @@ async def list_models():
     ]
     return {"object": "list", "data": models}
 
-LLM_SERVER_BASE = f"http://{LLM_HOST}:{LLM_PORT}"  # MUUTA oikeaksi
-
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
     # Luetaan alkuperäinen body sellaisenaan
@@ -854,7 +824,7 @@ async def chat_completions(request: Request):
             },
         )
 
-    upstream_url = f"{LLM_SERVER_BASE}/v1/chat/completions"
+    upstream_url = f"{settings.LLM_SERVER_BASE}/v1/chat/completions"
     headers = {"Content-Type": "application/json"}
 
     # 2) Jos pyydetään streamausta → välitetään SSE-stream läpi
