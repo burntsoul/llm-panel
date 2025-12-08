@@ -16,8 +16,11 @@ from llm_server import (
     cpu_activity_poller,
     touch_activity,
 )
-from models import get_model_display_entries, get_models_openai_format
-
+from models import (
+    get_model_display_entries,
+    get_models_openai_format,
+    get_model_table_status,
+)
 app = FastAPI()
 
 
@@ -158,6 +161,7 @@ def index():
     <body>
       <div class="card">
         <h1>LLM-palvelin</h1>
+        <p><a href="/models">Näytä mallilista ja tila</a></p>
         <p>LO100 virran tila: <b id="power-status">{power}</b></p>
         <p>LLM API:
           <span id="llm-api-status" class="{ 'status-ok' if up else 'status-bad' }">
@@ -450,6 +454,118 @@ def api_status():
         "system_health": health,
         "cpu_temp": cpu_temp,
     }
+
+@app.get("/api/models")
+def api_models():
+    """
+    Palauttaa mallien tilan JSON-muodossa:
+    - id
+    - label
+    - source
+    - device
+    - present_now (true/false/null)
+    """
+    rows = get_model_table_status()
+    return {"models": rows}
+
+@app.get("/models", response_class=HTMLResponse)
+def models_page():
+    """
+    Yksinkertainen HTML-näkymä mallifleetille.
+    """
+    rows = get_model_table_status()
+
+    def status_text(present_now):
+        if present_now is True:
+            return "✅ Ollamassa"
+        if present_now is False:
+            return "❌ Ei Ollamassa"
+        return "❓ Tuntematon"
+
+    table_rows = ""
+    for r in rows:
+        table_rows += f"""
+          <tr>
+            <td>{r["id"]}</td>
+            <td>{r["source"]}</td>
+            <td>{r["device"]}</td>
+            <td>{status_text(r["present_now"])}</td>
+            <td>{r["label"]}</td>
+          </tr>
+        """
+
+    html = f"""
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Mallit – LLM-agent</title>
+        <style>
+          body {{
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 1.5rem;
+            background: #f4f4f5;
+          }}
+          h1 {{
+            margin-top: 0;
+          }}
+          table {{
+            border-collapse: collapse;
+            width: 100%;
+            background: #ffffff;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.06);
+          }}
+          th, td {{
+            padding: 0.5rem 0.75rem;
+            border-bottom: 1px solid #e5e7eb;
+            text-align: left;
+            font-size: 0.9rem;
+          }}
+          th {{
+            background: #f3f4f6;
+            font-weight: 600;
+          }}
+          tr:last-child td {{
+            border-bottom: none;
+          }}
+          a {{
+            color: #2563eb;
+            text-decoration: none;
+          }}
+          a:hover {{
+            text-decoration: underline;
+          }}
+          .top-link {{
+            margin-bottom: 0.75rem;
+            display: inline-block;
+            font-size: 0.9rem;
+          }}
+        </style>
+      </head>
+      <body>
+        <a href="/" class="top-link">← Takaisin etusivulle</a>
+        <h1>Mallit ja tila</h1>
+        <table>
+          <thead>
+            <tr>
+              <th>Model ID</th>
+              <th>Source</th>
+              <th>Device</th>
+              <th>Tilanne nyt</th>
+              <th>Label</th>
+            </tr>
+          </thead>
+          <tbody>
+            {table_rows}
+          </tbody>
+        </table>
+      </body>
+    </html>
+    """
+    return HTMLResponse(html)
 
 # Voit halutessasi tehdä tästä async-version:
 async def ensure_llm_running_and_ready(timeout: int = 180) -> bool:

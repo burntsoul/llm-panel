@@ -251,3 +251,51 @@ def get_models_openai_format() -> List[Dict[str, Any]]:
             )
 
     return result
+def get_model_table_status() -> List[Dict[str, Any]]:
+    """
+    Palauttaa listan rivejä UI:lle ja /api/models -endpointille.
+
+    [
+      {
+        "id": "deepseek-coder:6.7b",
+        "label": "deepseek-coder:6.7b (💻 CPU-local)",
+        "source": "local",
+        "device": "cpu",
+        "present_now": true / false / None
+      },
+      ...
+    ]
+
+    present_now:
+      True  -> malli löytyy juuri nyt Ollaman /api/tags -listalta
+      False -> ei löydy Ollamasta nyt (mutta on config/meta-listalla)
+      None  -> Ollamaan ei saatu yhteyttä, tila tuntematon
+    """
+    entries = get_model_display_entries()
+
+    # Haetaan _suoraan_ Ollamalta tämän hetken tilanne, ei cachea
+    now_models = _fetch_from_ollama()
+    if now_models is None:
+        now_set = None
+    else:
+        now_set = {
+            m.get("name")
+            for m in now_models
+            if m.get("name")
+        }
+
+    rows: List[Dict[str, Any]] = []
+    for e in entries:
+        mid = e["id"]
+        if now_set is None:
+            present = None
+        else:
+            present = mid in now_set
+
+        row = {
+            **e,
+            "present_now": present,
+        }
+        rows.append(row)
+
+    return rows
