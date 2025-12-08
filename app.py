@@ -1,216 +1,23 @@
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
-import subprocess
 import requests
 import json
-import time
-import datetime
 import asyncio
 import httpx
 
 from config import settings
-
+from lo100 import lo100_power_status, lo100_power, get_lo100_health_and_temp
+from llm_server import (
+    llm_server_up,
+    is_llm_server_busy,
+    ensure_llm_running,
+    ensure_llm_running_and_ready,
+    idle_shutdown_loop,
+    cpu_activity_poller,
+    touch_activity,
+)
 
 app = FastAPI()
-
-
-_last_activity = datetime.datetime.utcnow()
-
-def _touch_activity():
-    """Merkitse, että LLM:ää juuri käytettiin."""
-    global _last_activity
-    _last_activity = datetime.datetime.utcnow()
-
-
-def llm_server_up() -> bool:
-    """Tarkista vastaako Ollama /api/tags:iin."""
-    try:
-        r = requests.get(f"http://{settings.LLM_HOST}:{settings.LLM_PORT}/api/tags", timeout=1.5)
-        return r.ok
-    except Exception:
-        return False
-
-
-def lo100_power_status() -> str:
-    cmd = [
-        "ipmitool",
-        "-I", "lanplus",
-        "-H", settings.LO100_IP,
-        "-U", settings.LO100_USER,
-        "-P", settings.LO100_PASS,
-        "chassis", "power", "status",
-    ]
-    try:
-        out = subprocess.check_output(
-            cmd, 
-            text=True, 
-            timeout=5,
-            stderr=subprocess.DEVNULL
-        )
-        return out.strip()
-    except Exception as e:
-        return f"ERROR: {e}"
-
-
-def lo100_power(action: str) -> str:
-    cmd = [
-        "ipmitool",
-        "-I", "lanplus",
-        "-H", settings.LO100_IP,
-        "-U", settings.LO100_USER,
-        "-P", settings.LO100_PASS,
-        "chassis", "power", action,
-    ]
-    try:
-        out = subprocess.check_output(
-            cmd, 
-            text=True, 
-            timeout=10,
-            stderr=subprocess.DEVNULL
-        )
-        return out.strip()
-    except Exception as e:
-        return f"ERROR: {e}"
-
-def get_lo100_health_and_temp():
-    """
-    Palauttaa (system_health, cpu_temp) LO100:n sensoreista.
-    system_health: 'ok', 'warning', 'critical' tai 'unknown'
-    cpu_temp: esim. '30.0 °C' tai None
-    """
-    cpu_temp = None
-    worst_level = 0  # 0=unknown, 1=ok, 2=warning, 3=critical
-
-    cmd = [
-        "ipmitool",
-        "-I", "lanplus",
-        "-H", settings.LO100_IP,
-        "-U", settings.LO100_USER,
-        "-P", settings.LO100_PASS,
-        "sensor",
-    ]
-
-    try:
-        out = subprocess.check_output(
-            cmd,
-            text=True,
-            timeout=15,
-            stderr=subprocess.DEVNULL,  # vaimennetaan ipmitoolin virheilmoitukset
-        )
-    except Exception:
-        return "unknown", cpu_temp
-
-    for line in out.splitlines():
-        # ohita mahdolliset virherivit
-        if not line.strip():
-            continue
-        if line.startswith("Get HPM.x Capabilities"):
-            continue
-
-        parts = [p.strip() for p in line.split("|")]
-        # Nimi | Lukema | Yksikkö | Status | ...
-        if len(parts) < 4:
-            continue
-
-        name = parts[0]
-        reading = parts[1]
-        units = parts[2]
-        status = parts[3].lower()
-
-        name_l = name.lower()
-        reading_l = reading.lower()
-        units_l = units.lower()
-
-        # Poimi CPU0 Dmn0 Temp
-        if "cpu0 dmn0 temp" in name_l and reading_l not in ("na", "unavailable"):
-            if "degrees" in units_l and reading.replace(".", "", 1).isdigit():
-                try:
-                    temp_val = float(reading)
-                    cpu_temp = f"{temp_val:.1f} °C"
-                except ValueError:
-                    cpu_temp = f"{reading} {units}"
-            else:
-                cpu_temp = f"{reading} {units}"
-
-        # --- System health -luokittelu ---
-
-        # Jos lukema/status on "na"/"unavailable" → ei vaikutusta healthiin
-        if reading_l in ("na", "unavailable"):
-            continue
-        if status in ("na", "ns", "n/a", "unavailable"):
-            continue
-
-        # Discrete-sensorien heksakoodit (0x0180, 0x0080 jne.) → ohitetaan
-        # jotta esim. Therm-Trip0 / Chassis / ACPI State ei turhaan pudota healthia.
-        if status.startswith("0x"):
-            continue
-
-        level = 0
-
-        # Pahat tilat
-        if any(word in status for word in [
-            "critical",
-            "non-recoverable",
-            "unrecoverable",
-            "fail",
-            "fault",
-        ]):
-            level = 3
-
-        # Varoitukset
-        elif any(word in status for word in [
-            "warning",
-            "non-critical",
-        ]):
-            level = 2
-
-        # Normaali tilanne
-        elif (
-            status.startswith("ok")
-            or "normal operating range" in status
-        ):
-            level = 1
-
-        if level > worst_level:
-            worst_level = level
-
-    if worst_level == 0:
-        health = "unknown"
-    elif worst_level == 1:
-        health = "ok"
-    elif worst_level == 2:
-        health = "warning"
-    else:
-        health = "critical"
-
-    return health, cpu_temp
-
-def get_llm_server_cpu_total():
-    """
-    Palauttaa llm-serverin kokonais-CPU-käytön prosentteina (0-100),
-    tai None jos lukemaa ei saatu.
-    """
-    try:
-        resp = requests.get(f"{settings.GLANCES_API_BASE}/cpu", timeout=1.0)
-        resp.raise_for_status()
-        data = resp.json()
-        total = data.get("total")
-        if total is None:
-            return None
-        return float(total)
-    except Exception:
-        return None
-
-
-def is_llm_server_busy(threshold: float | None = None) -> bool:
-    if threshold is None:
-        threshold = settings.CPU_BUSY_THRESHOLD_FOR_IDLE
-
-    total = get_llm_server_cpu_total()
-    if total is None:
-        return True
-    return total >= threshold
-
 
 
 def get_models():
@@ -229,65 +36,6 @@ def get_models():
 
     return models
 
-
-def ensure_llm_running() -> bool:
-    """
-    Varmista, että LLM-palvelin on käynnissä.
-    - Jos on jo UP, palauttaa True.
-    - Muuten lähettää LO100:lle 'power on' ja odottaa, kunnes /api/tags vastaa
-      tai timeout.
-    """
-    if llm_server_up():
-        return True
-
-    # Käynnistä palvelin LO100:n kautta
-    lo100_power("on")
-
-    deadline = time.time() + settings.LLM_BOOT_TIMEOUT
-    while time.time() < deadline:
-        if llm_server_up():
-            return True
-        time.sleep(settings.LLM_POLL_INTERVAL)
-
-    # Viimeinen tarkistus
-    return llm_server_up()
-
-
-async def idle_shutdown_loop():
-    """
-    Taustasäie, joka tarkkailee LLM:n käyttöä ja sammuttaa sen kun sitä
-    ei ole käytetty pitkään aikaan.
-    """
-    global _last_activity
-    while True:
-        await asyncio.sleep(60)  # tarkista minuutin välein
-        if not llm_server_up():
-            continue
-        idle = (datetime.datetime.utcnow() - _last_activity).total_seconds()
-        if idle > settings.LLM_IDLE_SECONDS:
-            # Yritä ensin soft shutdown
-            lo100_power("soft")
-            # Jos haluat varmistaa, että se oikeasti menee kiinni,
-            # tänne voisi halutessa lisätä vielä odottelua ja tarvittaessa "off".
-
-async def cpu_activity_poller():
-    """
-    Pollaa llm-serverin CPU-kuormaa säännöllisesti ja
-    kutsuu _touch_activity(), jos kuorma on selvästi ei-idle.
-    Näin idle_shutdown_loop ei laukea, kun LLM:ää käytetään
-    suoraan esimerkiksi VS Codesta.
-    """
-    while True:
-        try:
-            # get_llm_server_cpu_total käyttää requestsia → ajetaan säikeessä
-            total = await asyncio.to_thread(get_llm_server_cpu_total)
-            if total is not None and total >= settings.CPU_BUSY_THRESHOLD_FOR_IDLE:
-                _touch_activity()
-        except Exception:
-            # ei kaadeta polleria yksittäiseen virheeseen
-            pass
-
-        await asyncio.sleep(settings.CPU_POLL_INTERVAL_SECONDS)
 
 @app.on_event("startup")
 async def _startup():
@@ -657,7 +405,7 @@ def chat_stream(model: str = Form(...), prompt: str = Form(...)):
     Streamaa Ollaman vastauksen selaimelle token- / chunk-kerrallaan.
     Huolehtii myös siitä, että LLM-palvelin herätetään tarvittaessa.
     """
-    _touch_activity()
+    touch_activity()
 
     def generate():
         # Jos LLM ei ole ylhäällä, kerro käyttäjälle ja käynnistä
@@ -684,7 +432,7 @@ def chat_stream(model: str = Form(...), prompt: str = Form(...)):
                     continue
                 chunk = data.get("response", "")
                 if chunk:
-                    _touch_activity()
+                    touch_activity()
                     yield chunk
                 if data.get("done"):
                     break
@@ -698,7 +446,7 @@ def chat_stream(model: str = Form(...), prompt: str = Form(...)):
 def api_wake_llm():
     ok = ensure_llm_running()
     if ok:
-        _touch_activity()
+        touch_activity()
     return {"ok": ok, "up": llm_server_up()}
 
 
@@ -733,7 +481,7 @@ async def ensure_llm_running_and_ready(timeout: int = 180) -> bool:
     while loop.time() - start < timeout:
         up = await loop.run_in_executor(None, llm_server_up)
         if up:
-            _touch_activity()
+            touch_activity()
             return True
         await asyncio.sleep(3)
 
