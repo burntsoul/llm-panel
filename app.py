@@ -16,25 +16,9 @@ from llm_server import (
     cpu_activity_poller,
     touch_activity,
 )
+from models import get_model_names, get_models_openai_format
 
 app = FastAPI()
-
-
-def get_models():
-    models = []
-    try:
-        r = requests.get(f"http://{settings.LLM_HOST}:{settings.LLM_PORT}/api/tags", timeout=2)
-        r.raise_for_status()
-        data = r.json()
-        models = [m["name"] for m in data.get("models", [])]
-    except Exception:
-        # ei saada yhteyttä Ollamaan → käytä fallbackia
-        pass
-
-    if not models:
-        models = [m.strip() for m in settings.DEFAULT_MODELS if m.strip()]
-
-    return models
 
 
 @app.on_event("startup")
@@ -48,7 +32,7 @@ async def _startup():
 def index():
     up = llm_server_up()
     power = lo100_power_status()
-    models = get_models()
+    models = get_model_names()
     html_models = "".join(
         f'<option value="{m}">{m}</option>' for m in models
     )
@@ -492,61 +476,13 @@ async def ensure_llm_running_and_ready(timeout: int = 180) -> bool:
 @app.get("/v1/models")
 async def list_models():
     """
-    Palautetaan staattinen lista malleista.
-    Näin WebUI näkee mallit vaikka llm-server olisi kiinni.
+    Palautetaan mallilista:
+    - ensisijaisesti Ollamalta (cachetettu)
+    - jos ei saatavilla, käytetään viimeisintä cachea tai DEFAULT_MODELS-listaa.
     """
-    models = [
-        {
-            "id": "qwen3-vl:8b", # Ladattu
-            "object": "model",
-            "created": 1730000000,
-            "owned_by": "llm-server",
-        },
-        {
-            "id": "qwen3-vl:235b-cloud",
-            "object": "model",
-            "created": 1730000000,
-            "owned_by": "llm-server",
-        },
-        {
-            "id": "qwen3-coder:30b",
-            "object": "model",
-            "created": 1730000001,
-            "owned_by": "llm-server",
-        },  
-        {
-            "id": "deepseek-coder-v2:16b",
-            "object": "model",
-            "created": 1730000003,
-            "owned_by": "llm-server",
-        },        
-        {
-            "id": "deepseek-r1:8b",
-            "object": "model",
-            "created": 1730000004,
-            "owned_by": "llm-server",
-        },
-        {
-            "id": "deepseek-coder:6.7b",
-            "object": "model",
-            "created": 1730000000,
-            "owned_by": "llm-server",
-        },
-        {
-            "id": "deepseek-coder:1.3b",
-            "object": "model",
-            "created": 1730000000,
-            "owned_by": "llm-server",
-        },
-        {
-            "id": "llama3.2:latest",
-            "object": "model",
-            "created": 1730000000,
-            "owned_by": "llm-server",
-        },
-        # lisää tänne niitä malleja, joita aiot käyttää
-    ]
-    return {"object": "list", "data": models}
+    data = get_models_openai_format()
+    return {"object": "list", "data": data}
+
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
