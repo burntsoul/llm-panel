@@ -19,6 +19,10 @@
     "source": "local",
     "device": "cpu"
   },
+  "deepseek-r1:32b": {
+    "source": "local",
+    "device": "cpu"
+  },
   "deepseek-coder:6.7b": {
     "source": "local",
     "device": "cpu"
