@@ -1,134 +1,121 @@
-# lo100.py
+# lo100.py  (legacy name)
+# HUOM: Uudessa infrassa LLM-agent EI enää käynnistä/sammuta koko palvelinta IPMI:llä.
+# Tätä moduulia käytetään vain iLO/IPMI *status*-tiedon hakemiseen (health/temps).
+# IPMI power-komennot ovat oletuksena DISABLOITU.
+
+from __future__ import annotations
+
+import os
 import subprocess
+from typing import Tuple, Optional
+
 from config import settings
 
 
+def _ipmi_enabled() -> bool:
+    return bool(settings.ILO_IP and settings.ILO_USER and settings.ILO_PASS)
+
+
 def lo100_power_status() -> str:
+    """Palauta chassis power status iLO/IPMI:ltä (jos konffattu)."""
+    if not _ipmi_enabled():
+        return "N/A (iLO/IPMI ei konffattu)"
     cmd = [
         "ipmitool",
         "-I", "lanplus",
-        "-H", settings.LO100_IP,
-        "-U", settings.LO100_USER,
-        "-P", settings.LO100_PASS,
+        "-H", settings.ILO_IP,
+        "-U", settings.ILO_USER,
+        "-P", settings.ILO_PASS,
         "chassis", "power", "status",
     ]
     try:
-        out = subprocess.check_output(
-            cmd,
-            text=True,
-            timeout=5,
-            stderr=subprocess.DEVNULL,
-        )
+        out = subprocess.check_output(cmd, text=True, timeout=10, stderr=subprocess.DEVNULL)
         return out.strip()
     except Exception as e:
         return f"ERROR: {e}"
 
 
 def lo100_power(action: str) -> str:
+    """Legacy: IPMI power control (DISABLED by default)."""
+    if os.getenv("ALLOW_IPMI_POWER", "").strip().lower() not in ("1","true","yes","on"):
+        return "IPMI power ohjaus on disabloitu (aseta ALLOW_IPMI_POWER=1 jos tiedät mitä teet)."
+
+    if not _ipmi_enabled():
+        return "iLO/IPMI ei ole konffattu (ILO_IP/ILO_USER/ILO_PASS)."
+
+    action_map = {
+        "on": "on",
+        "off": "off",
+        "soft": "soft",
+        "cycle": "cycle",
+        "reset": "reset",
+    }
+    if action not in action_map:
+        return f"Tuntematon action: {action}"
+
     cmd = [
         "ipmitool",
         "-I", "lanplus",
-        "-H", settings.LO100_IP,
-        "-U", settings.LO100_USER,
-        "-P", settings.LO100_PASS,
-        "chassis", "power", action,
+        "-H", settings.ILO_IP,
+        "-U", settings.ILO_USER,
+        "-P", settings.ILO_PASS,
+        "chassis", "power", action_map[action],
     ]
     try:
-        out = subprocess.check_output(
-            cmd,
-            text=True,
-            timeout=10,
-            stderr=subprocess.DEVNULL,
-        )
+        out = subprocess.check_output(cmd, text=True, timeout=15, stderr=subprocess.DEVNULL)
         return out.strip()
     except Exception as e:
         return f"ERROR: {e}"
 
 
-def get_lo100_health_and_temp():
+def get_lo100_health_and_temp() -> Tuple[str, Optional[float]]:
     """
-    Palauttaa (system_health, cpu_temp) LO100:n sensoreista.
+    Palauttaa (system_health, cpu_temp) iLO/IPMI sensoreista.
     system_health: 'ok', 'warning', 'critical' tai 'unknown'
-    cpu_temp: esim. '30.0 °C' tai None
+    cpu_temp: float (C) jos löytyy, muuten None
     """
-    cpu_temp = None
-    worst_level = 0  # 0=unknown, 1=ok, 2=warning, 3=critical
+    if not _ipmi_enabled():
+        return "unknown", None
 
     cmd = [
         "ipmitool",
         "-I", "lanplus",
-        "-H", settings.LO100_IP,
-        "-U", settings.LO100_USER,
-        "-P", settings.LO100_PASS,
-        "sensor",
+        "-H", settings.ILO_IP,
+        "-U", settings.ILO_USER,
+        "-P", settings.ILO_PASS,
+        "sdr",
     ]
-
     try:
-        out = subprocess.check_output(
-            cmd,
-            text=True,
-            timeout=15,
-            stderr=subprocess.DEVNULL,
-        )
+        out = subprocess.check_output(cmd, text=True, timeout=15, stderr=subprocess.DEVNULL)
     except Exception:
-        return "unknown", cpu_temp
+        return "unknown", None
 
+    health = "ok"
+    cpu0_temp = None
+
+    # Etsi tyypilliset hälytykset ja CPU0-temp
     for line in out.splitlines():
-        if not line.strip():
-            continue
-        if line.startswith("Get HPM.x Capabilities"):
-            continue
+        lower = line.lower()
+        if "critical" in lower:
+            health = "critical"
+        elif "warning" in lower and health != "critical":
+            health = "warning"
 
-        parts = [p.strip() for p in line.split("|")]
-        if len(parts) < 4:
-            continue
-
-        name = parts[0]
-        reading = parts[1]
-        units = parts[2]
-        status = parts[3].lower()
-
-        name_l = name.lower()
-        reading_l = reading.lower()
-        units_l = units.lower()
-
-        # CPU-lämpötila
-        if "cpu0 dmn0 temp" in name_l and reading_l not in ("na", "unavailable"):
-            if "degrees" in units_l and reading.replace(".", "", 1).isdigit():
+        # HPE/ILO sensorien nimet vaihtelevat: etsitään "cpu" + "temp"
+        if cpu0_temp is None and "cpu" in lower and "temp" in lower:
+            parts = [p.strip() for p in line.split("|")]
+            if len(parts) >= 2:
+                # usein "xx degrees C"
+                m = None
                 try:
-                    temp_val = float(reading)
-                    cpu_temp = f"{temp_val:.1f} °C"
-                except ValueError:
-                    cpu_temp = f"{reading} {units}"
-            else:
-                cpu_temp = f"{reading} {units}"
+                    import re
+                    m = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*degrees", parts[1], re.IGNORECASE)
+                except Exception:
+                    m = None
+                if m:
+                    try:
+                        cpu0_temp = float(m.group(1))
+                    except Exception:
+                        cpu0_temp = None
 
-        # health-luokittelu
-        if reading_l in ("na", "unavailable"):
-            continue
-        if status in ("na", "ns", "n/a", "unavailable"):
-            continue
-        if status.startswith("0x"):
-            continue
-
-        level = 0
-        if any(word in status for word in ("critical", "non-recoverable", "unrecoverable", "fail", "fault")):
-            level = 3
-        elif any(word in status for word in ("warning", "non-critical")):
-            level = 2
-        elif status.startswith("ok") or "normal operating range" in status:
-            level = 1
-
-        if level > worst_level:
-            worst_level = level
-
-    if worst_level == 0:
-        health = "unknown"
-    elif worst_level == 1:
-        health = "ok"
-    elif worst_level == 2:
-        health = "warning"
-    else:
-        health = "critical"
-
-    return health, cpu_temp
+    return health, cpu0_temp

@@ -6,7 +6,9 @@ import asyncio
 import httpx
 
 from config import settings
-from lo100 import lo100_power_status, lo100_power, get_lo100_health_and_temp
+from lo100 import get_lo100_health_and_temp
+from proxmox import get_vm_status, start_vm, shutdown_vm, stop_vm
+from state import get_maintenance_mode, toggle_maintenance_mode, set_maintenance_mode
 from llm_server import (
     llm_server_up,
     is_llm_server_busy,
@@ -34,7 +36,17 @@ async def _startup():
 @app.get("/", response_class=HTMLResponse)
 def index():
     up = llm_server_up()
-    power = lo100_power_status()
+    # Proxmox VM statukset
+    try:
+        llm_vm = get_vm_status(settings.LLM_VM_ID)
+    except Exception as e:
+        llm_vm = f"ERROR: {e}"
+    try:
+        win_vm = get_vm_status(settings.WINDOWS_VM_ID)
+    except Exception as e:
+        win_vm = f"ERROR: {e}"
+
+    maintenance = get_maintenance_mode()
     entries = get_model_display_entries()
     html_models = "".join(
         f'<option value="{e["id"]}">{e["label"]}</option>' for e in entries
@@ -210,7 +222,9 @@ def index():
             Näytä mallilista ja tila
           </button>
         </p>
-        <p>LO100 virran tila: <b id="power-status">{power}</b></p>
+        <p>LLM-VM tila: <b id="llm-vm-status">{llm_vm}</b></p>
+        <p>Windows-VM tila: <b id="win-vm-status">{win_vm}</b></p>
+        <p>Huoltotila: <b id="maintenance-status">{'ON' if maintenance else 'OFF'}</b></p>
         <p>LLM API:
           <span id="llm-api-status" class="{ 'status-ok' if up else 'status-bad' }">
             {'UP' if up else 'DOWN'}
@@ -226,9 +240,24 @@ def index():
         </p>
 
         <div class="power-buttons">
-          <button type="button" onclick="sendPower('on')">Power ON</button>
-          <button type="button" onclick="sendPower('soft')">Soft shutdown</button>
-          <button type="button" onclick="sendPower('off')">Hard OFF</button>
+          <div style="margin-bottom:0.6rem;">
+            <b>LLM-VM ({settings.LLM_VM_ID})</b><br/>
+            <button type="button" onclick="sendPower('llm_on')">Start</button>
+            <button type="button" onclick="sendPower('llm_shutdown')">Shutdown</button>
+            <button type="button" onclick="sendPower('llm_stop')">Force stop</button>
+          </div>
+
+          <div style="margin-bottom:0.6rem;">
+            <b>Windows-VM ({settings.WINDOWS_VM_ID})</b><br/>
+            <button type="button" onclick="sendPower('win_on')">Start</button>
+            <button type="button" onclick="sendPower('win_shutdown')">Shutdown</button>
+            <button type="button" onclick="sendPower('win_stop')">Force stop</button>
+          </div>
+
+          <div>
+            <b>Huolto</b><br/>
+            <button type="button" onclick="sendPower('maintenance_toggle')">Toggle huoltotila</button>
+          </div>
         </div>
 
 
@@ -300,13 +329,21 @@ def index():
               throw new Error('HTTP ' + response.status);
             }}
             const data = await response.json();
-            const powerEl = document.getElementById('power-status');
+            const llmVmEl = document.getElementById('llm-vm-status');
+            const winVmEl = document.getElementById('win-vm-status');
+            const maintEl = document.getElementById('maintenance-status');
             const llmEl = document.getElementById('llm-api-status');
             const healthEl = document.getElementById('system-health');
             const cpuTempEl = document.getElementById('cpu-temp');
 
-            if (powerEl && data.power) {{
-              powerEl.textContent = data.power;
+            if (llmVmEl && data.llm_vm) {{
+              llmVmEl.textContent = data.llm_vm;
+            }}
+            if (winVmEl && data.windows_vm) {{
+              winVmEl.textContent = data.windows_vm;
+            }}
+            if (maintEl && (data.maintenance_mode !== undefined)) {{
+              maintEl.textContent = data.maintenance_mode ? 'ON' : 'OFF';
             }}
 
             if (llmEl) {{
@@ -540,40 +577,108 @@ def index():
 
 @app.post("/power", response_class=HTMLResponse)
 def power(action: str = Form(...)):
-    # Estä soft/hard OFF jos LLM-serverillä on selvästi kuormaa
-    if action in ("off", "soft"):
-        if is_llm_server_busy():
-            msg = "LLM-palvelin näyttää olevan käytössä (CPU-kuorma korkea), sammutusta ei suoritettu."
-            return f"<html><body><p>{msg}</p><p><a href='/'>Takaisin</a></p></body></html>"
-
-    msg = lo100_power(action)
-    return f"<html><body><p>Komento: {action} → {msg}</p><p><a href='/'>Takaisin</a></p></body></html>"
+    # Ohjaus tapahtuu /power_json:in kautta, mutta pidetään tämäkin.
+    res = power_json(action)
+    msg = res.get("message", "")
+    return f"<html><body><p>{msg}</p><p><a href='/'>Takaisin</a></p></body></html>"
 
 @app.post("/power_json")
 def power_json(action: str = Form(...)):
     """
-    Sama logiikka kuin /power, mutta JSON-muodossa.
-    Tarkoitettu käytettäväksi UI:n modaalin kanssa.
+    Proxmox VM -ohjaus + huoltotila.
+    action:
+      - llm_on / llm_shutdown / llm_stop
+      - win_on / win_shutdown / win_stop
+      - maintenance_toggle (tai maintenance_on/off)
     """
-    # Estä soft/hard OFF jos LLM-serverillä on selvästi kuormaa
-    if action in ("off", "soft"):
-        if is_llm_server_busy():
-            msg = (
-                "LLM-palvelin näyttää olevan käytössä (CPU-kuorma korkea), "
-                "sammutusta ei suoritettu."
-            )
-            return {
-                "ok": False,
-                "message": msg,
-                "power": lo100_power_status(),
-            }
+    action = (action or "").strip()
 
-    msg = lo100_power(action)
-    return {
-        "ok": True,
-        "message": msg,
-        "power": lo100_power_status(),
-    }
+    # Huoltotila
+    if action == "maintenance_toggle":
+        new_val = toggle_maintenance_mode()
+        try:
+            llm_vm = get_vm_status(settings.LLM_VM_ID)
+        except Exception as e:
+            llm_vm = f"ERROR: {e}"
+        try:
+            win_vm = get_vm_status(settings.WINDOWS_VM_ID)
+        except Exception as e:
+            win_vm = f"ERROR: {e}"
+        return {
+            "ok": True,
+            "message": f"Huoltotila {'ON' if new_val else 'OFF'}",
+            "llm_vm": llm_vm,
+            "windows_vm": win_vm,
+            "maintenance_mode": new_val,
+        }
+
+    if action in ("maintenance_on", "maintenance_off"):
+        set_maintenance_mode(action == "maintenance_on")
+
+    maintenance = get_maintenance_mode()
+
+    # Helper to return statuses
+    def _status_payload(ok: bool, message: str):
+        try:
+            llm_vm = get_vm_status(settings.LLM_VM_ID)
+        except Exception as e:
+            llm_vm = f"ERROR: {e}"
+        try:
+            win_vm = get_vm_status(settings.WINDOWS_VM_ID)
+        except Exception as e:
+            win_vm = f"ERROR: {e}"
+        return {
+            "ok": ok,
+            "message": message,
+            "llm_vm": llm_vm,
+            "windows_vm": win_vm,
+            "maintenance_mode": maintenance,
+        }
+
+    # LLM VM commands
+    if action == "llm_on":
+        # käynnistä + odota että Ollama vastaa
+        ok = ensure_llm_running()
+        if ok:
+            return _status_payload(True, "LLM käynnistetty (Ollama vastaa).")
+        return _status_payload(False, "LLM:n käynnistys epäonnistui (katso lokit).")
+
+    if action in ("llm_shutdown", "llm_stop"):
+        # estä shutdown jos selvästi kuormaa (paitsi huoltotilassa)
+        if not maintenance and action == "llm_shutdown" and is_llm_server_busy():
+            return _status_payload(
+                False,
+                "LLM näyttää olevan käytössä (CPU-kuorma korkea), shutdownia ei suoritettu."
+            )
+        if action == "llm_shutdown":
+            ok, msg = shutdown_vm(settings.LLM_VM_ID, wait_stopped=False)
+            return _status_payload(ok, f"LLM shutdown: {msg}")
+        ok, msg = stop_vm(settings.LLM_VM_ID, wait_stopped=True)
+        return _status_payload(ok, f"LLM force stop: {msg}")
+
+    # Windows VM commands
+    if action == "win_on":
+        # exclusivity: jos LLM-VM on päällä ja enforce, estä
+        if settings.ENFORCE_EXCLUSIVE_VMS:
+            try:
+                llm_status = get_vm_status(settings.LLM_VM_ID)
+            except Exception as e:
+                return _status_payload(False, f"LLM-VM statusta ei saatu: {e}")
+            if llm_status == "running":
+                return _status_payload(False, "LLM-VM on käynnissä. Sammuta LLM-VM ennen Windows-VM:n käynnistystä.")
+        ok, msg = start_vm(settings.WINDOWS_VM_ID, wait_running=True, timeout_s=90)
+        return _status_payload(ok, f"Windows start: {msg}")
+
+    if action == "win_shutdown":
+        ok, msg = shutdown_vm(settings.WINDOWS_VM_ID, wait_stopped=False)
+        return _status_payload(ok, f"Windows shutdown: {msg}")
+
+    if action == "win_stop":
+        ok, msg = stop_vm(settings.WINDOWS_VM_ID, wait_stopped=True)
+        return _status_payload(ok, f"Windows force stop: {msg}")
+
+    return _status_payload(False, f"Tuntematon action: {action}")
+
 
 
 @app.post("/chat_stream")
@@ -630,16 +735,31 @@ def api_wake_llm():
 @app.get("/api/status")
 def api_status():
     """
-    Yksinkertainen status-endpoint UI:lle.
-    Palauttaa LO100 virran tilan, LLM API -statuksen,
-    sekä system healthin ja CPU-lämpötilan.
+    Status UI:lle.
+    - llm_up: vastaako Ollama
+    - llm_vm/windows_vm: Proxmox VM status
+    - maintenance_mode: huoltotila
+    - system_health/cpu_temp: iLO/IPMI (jos konffattu)
     """
     up = llm_server_up()
-    power = lo100_power_status()
+
+    try:
+        llm_vm = get_vm_status(settings.LLM_VM_ID)
+    except Exception as e:
+        llm_vm = f"ERROR: {e}"
+    try:
+        win_vm = get_vm_status(settings.WINDOWS_VM_ID)
+    except Exception as e:
+        win_vm = f"ERROR: {e}"
+
+    maintenance = get_maintenance_mode()
     health, cpu_temp = get_lo100_health_and_temp()
+
     return {
         "llm_up": up,
-        "power": power,
+        "llm_vm": llm_vm,
+        "windows_vm": win_vm,
+        "maintenance_mode": maintenance,
         "system_health": health,
         "cpu_temp": cpu_temp,
     }

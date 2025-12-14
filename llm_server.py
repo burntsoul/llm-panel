@@ -1,17 +1,22 @@
 # llm_server.py
+from __future__ import annotations
+
 import time
 import datetime
 import asyncio
+from typing import Optional, Tuple
+
 import requests
 
 from config import settings
-from lo100 import lo100_power
+from proxmox import get_vm_status, start_vm, shutdown_vm
+from state import get_maintenance_mode
 
 
 _last_activity = datetime.datetime.utcnow()
 
 
-def touch_activity():
+def touch_activity() -> None:
     """Merkitse, että LLM:ää juuri käytettiin."""
     global _last_activity
     _last_activity = datetime.datetime.utcnow()
@@ -33,7 +38,7 @@ def llm_server_up() -> bool:
         return False
 
 
-def get_llm_server_cpu_total():
+def get_llm_server_cpu_total() -> Optional[float]:
     """
     Palauttaa llm-serverin kokonais-CPU-käytön prosentteina (0-100),
     tai None jos lukemaa ei saatu.
@@ -50,52 +55,72 @@ def get_llm_server_cpu_total():
         return None
 
 
-def is_llm_server_busy(threshold: float | None = None) -> bool:
-    """
-    Palauttaa True jos llm-serverin CPU-kuorma ylittää threshold-%.
-    Virhetilanteessa palauttaa True (fail safe, ei sammuteta sokkona).
-    """
+def is_llm_server_busy(threshold: Optional[float] = None) -> bool:
+    """True jos LLM-serverin CPU on yli rajan."""
     if threshold is None:
         threshold = settings.CPU_BUSY_THRESHOLD_FOR_IDLE
-
     total = get_llm_server_cpu_total()
     if total is None:
-        return True
+        # jos emme saa lukemaa, oletetaan ettei ole kiireellinen estää
+        return False
     return total >= threshold
 
 
-def ensure_llm_running() -> bool:
+def ensure_llm_running_with_reason() -> Tuple[bool, str]:
     """
-    Varmista, että LLM-palvelin on käynnissä.
-    - Jos on jo UP, palauttaa True.
-    - Muuten lähettää LO100:lle 'power on' ja odottaa, kunnes /api/tags vastaa
-      tai timeout.
+    Varmista, että LLM-VM + Ollama on käynnissä.
+    - Jos Ollama on jo UP, palauttaa (True, ...)
+    - Muuten käynnistää Proxmoxista LLM-VM:n ja odottaa että /api/tags vastaa
+    - Jos EXCLUSIVE_VMS on päällä ja Windows-VM on käynnissä, ei käynnistä.
     """
     if llm_server_up():
-        return True
+        return True, "Ollama on jo käynnissä."
 
-    lo100_power("on")
+    # GPU-exclusivity
+    if settings.ENFORCE_EXCLUSIVE_VMS:
+        try:
+            win_status = get_vm_status(settings.WINDOWS_VM_ID)
+        except Exception as e:
+            return False, f"Windows-VM statusta ei saatu: {e}"
+        if win_status == "running":
+            return False, "Windows-VM on käynnissä. Sammuta Windows-VM ennen LLM-VM:n käynnistystä."
 
+    # Start LLM VM if needed
+    try:
+        st = get_vm_status(settings.LLM_VM_ID)
+    except Exception as e:
+        return False, f"LLM-VM statusta ei saatu: {e}"
+
+    if st != "running":
+        ok, msg = start_vm(settings.LLM_VM_ID, wait_running=True, timeout_s=90)
+        if not ok:
+            return False, f"LLM-VM start epäonnistui: {msg}"
+
+    # Wait for Ollama API
     deadline = time.time() + settings.LLM_BOOT_TIMEOUT
     while time.time() < deadline:
         if llm_server_up():
-            return True
+            touch_activity()
+            return True, "LLM on käynnissä ja valmis."
         time.sleep(settings.LLM_POLL_INTERVAL)
 
-    return llm_server_up()
+    return False, "LLM käynnistys aikakatkaistiin (Ollama ei vastannut /api/tags)."
+
+
+def ensure_llm_running() -> bool:
+    ok, _ = ensure_llm_running_with_reason()
+    return ok
 
 
 async def ensure_llm_running_and_ready(timeout: int | None = None) -> bool:
-    """
-    Async-versio: käynnistää LLM:n threadissä ja odottaa, että /api/tags vastaa.
-    """
+    """Async-versio: käynnistää LLM:n threadissä ja odottaa, että /api/tags vastaa."""
     if timeout is None:
         timeout = settings.LLM_BOOT_TIMEOUT
 
     loop = asyncio.get_running_loop()
     start = loop.time()
 
-    ok = await loop.run_in_executor(None, ensure_llm_running)
+    ok, _ = await loop.run_in_executor(None, ensure_llm_running_with_reason)
     if not ok:
         return False
 
@@ -109,29 +134,37 @@ async def ensure_llm_running_and_ready(timeout: int | None = None) -> bool:
     return False
 
 
-async def idle_shutdown_loop():
+async def idle_shutdown_loop() -> None:
     """
-    Taustasäie, joka tarkkailee LLM:n käyttöä ja sammuttaa sen
+    Taustasäie, joka tarkkailee LLM:n käyttöä ja sammuttaa LLM-VM:n
     kun sitä ei ole käytetty pitkään aikaan.
+    (Huoltotilassa EI sammuta.)
     """
     global _last_activity
     while True:
         await asyncio.sleep(60)
+
+        if get_maintenance_mode():
+            continue
+
         if not llm_server_up():
             continue
 
         idle = (datetime.datetime.utcnow() - _last_activity).total_seconds()
         if idle > settings.LLM_IDLE_SECONDS:
-            lo100_power("soft")
-            # halutessa voisi lisätä vielä varmistus-offin
+            # käytä lempeää shutdownia (ei force stop)
+            shutdown_vm(settings.LLM_VM_ID, wait_stopped=False)
+            # halutessa voisi lisätä varmistus-stopin myöhemmin
 
 
-async def cpu_activity_poller():
+async def cpu_activity_poller() -> None:
     """
     Pollaa llm-serverin CPU-kuormaa säännöllisesti ja
     kutsuu touch_activity(), jos kuorma on selvästi ei-idle.
     Näin idle_shutdown_loop ei laukea, kun LLM:ää käytetään
     suoraan esimerkiksi VS Codesta.
+
+    (Huoltotilassa ei tarvitse tehdä mitään, mutta poller ei haittaa.)
     """
     while True:
         try:

@@ -1,4 +1,6 @@
-.venv/
+# secrets & runtime state
+secrets.py
+state.json
 __pycache__/
 *.pyc
-*.log
+.env
