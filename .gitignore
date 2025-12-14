@@ -4,3 +4,4 @@ state.json
 __pycache__/
 *.pyc
 .env
+llm_secrets.py

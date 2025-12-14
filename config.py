@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 try:
-    import secrets  # type: ignore
+    import llm_secrets as secrets  # type: ignore
 except Exception:
     secrets = None  # type: ignore
 
