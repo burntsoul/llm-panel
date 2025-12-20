@@ -5,3 +5,6 @@ __pycache__/
 *.pyc
 .env
 llm_secrets.py
+
+# Local virtualenv
+.venv/
