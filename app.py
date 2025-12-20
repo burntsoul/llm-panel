@@ -1099,9 +1099,10 @@ async def create_embeddings(request: Request):
         headers = {"Content-Type": "application/json"}
         
         # Rakenna payload Ollaman odottamassa muodossa
+        # Ollama expects "input" field (array of strings)
         upstream_payload = {
             "model": model,
-            "prompt": texts if len(texts) > 1 else texts[0],
+            "input": texts,
         }
         
         try:
@@ -1113,38 +1114,31 @@ async def create_embeddings(request: Request):
                 )
             
             if upstream_resp.status_code != 200:
+                # Try to get detailed error message from Ollama
+                try:
+                    error_detail = upstream_resp.json()
+                except Exception:
+                    error_detail = upstream_resp.text
+                
                 return JSONResponse(
                     status_code=upstream_resp.status_code,
                     content={
                         "error": {
-                            "message": f"Upstream embedding service returned status {upstream_resp.status_code}",
+                            "message": f"Upstream embedding service error",
                             "type": "server_error",
+                            "detail": str(error_detail),
                         }
                     },
                 )
             
             data = upstream_resp.json()
             
-            # Ollama palauttaa "embedding"-kentän yhdelle tekstille tai "embeddings"-kentän listalle
-            if "embedding" in data:
-                # Single embedding
-                embeddings_data = [data["embedding"]]
-            elif "embeddings" in data:
-                # Multiple embeddings
-                embeddings_data = data["embeddings"]
-            else:
-                return JSONResponse(
-                    status_code=502,
-                    content={
-                        "error": {
-                            "message": "Invalid response format from upstream embedding service",
-                            "type": "bad_gateway",
-                        }
-                    },
-                )
+            # Ollama returns the response in correct OpenAI format already
+            # Just use it directly (it should have "object", "data", "model", "usage")
+            embeddings_data = data
             
             # Cache the result
-            cache_embeddings(model, texts, embeddings_data)
+            cache_embeddings(model, texts, data.get("data", []))
         
         except Exception as e:
             return JSONResponse(
@@ -1157,34 +1151,25 @@ async def create_embeddings(request: Request):
                 },
             )
     
-    # 4) Format response in OpenAI format
+    # 4) Return response (Ollama already returns in correct format)
+    # Just ensure model field is set correctly and add usage stats
     response_data = {
-        "object": "list",
-        "data": [],
+        "object": embeddings_data.get("object", "list"),
+        "data": embeddings_data.get("data", []),
         "model": model,
-        "usage": {
-            "prompt_tokens": sum(len(t.split()) for t in texts),  # rough estimate
+        "usage": embeddings_data.get("usage", {
+            "prompt_tokens": sum(len(t.split()) for t in texts),
             "total_tokens": sum(len(t.split()) for t in texts),
-        }
+        })
     }
     
-    for idx, embedding_vector in enumerate(embeddings_data):
-        if encoding_format == "base64":
-            # Convert to base64 if requested (optional feature)
-            import base64
-            encoded = base64.b64encode(
-                json.dumps(embedding_vector).encode("utf-8")
-            ).decode("utf-8")
-            data_value = encoded
-        else:
-            data_value = embedding_vector
-        
-        response_data["data"].append(
-            {
-                "object": "embedding",
-                "embedding": data_value,
-                "index": idx,
-            }
-        )
+    # If base64 encoding requested, convert embeddings
+    if encoding_format == "base64":
+        import base64
+        for item in response_data["data"]:
+            if "embedding" in item and isinstance(item["embedding"], list):
+                item["embedding"] = base64.b64encode(
+                    json.dumps(item["embedding"]).encode("utf-8")
+                ).decode("utf-8")
     
     return JSONResponse(status_code=200, content=response_data)
