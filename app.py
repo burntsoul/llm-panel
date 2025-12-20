@@ -914,14 +914,73 @@ async def list_models():
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
-    # Luetaan alkuperäinen body sellaisenaan
+    """
+    OpenAI-yhteensopiva chat completions -endpointti.
+    
+    Tukee:
+    - system prompt -viestit
+    - temperature, top_p, max_tokens -parametrit
+    - tools / function_calling -kutsut
+    - streaming-vastauksia
+    """
+    # Luetaan alkuperäinen body
     body_bytes = await request.body()
     try:
         body = json.loads(body_bytes.decode("utf-8"))
     except Exception:
         body = {}
 
+    # Otetaan talteen alkuperäiset parametrit
     stream = bool(body.get("stream", False))
+    temperature = body.get("temperature")
+    top_p = body.get("top_p")
+    max_tokens = body.get("max_tokens")
+    tools = body.get("tools")
+    tool_choice = body.get("tool_choice")
+    
+    # Käsitellään messages - voidaan lisätä system prompt
+    messages = body.get("messages", [])
+    system_prompt = body.get("system_prompt")
+    
+    # Jos system_prompt on annettu eikä messages sisällä system-roolia,
+    # lisätään se messages-listan alkuun
+    if system_prompt:
+        has_system = any(msg.get("role") == "system" for msg in messages)
+        if not has_system:
+            messages.insert(0, {"role": "system", "content": system_prompt})
+    
+    # Rakennetaan upstream-payload
+    upstream_payload = {
+        "model": body.get("model"),
+        "messages": messages,
+    }
+    
+    # Lisätään valinnaiset parametrit jos ne on määritetty
+    if temperature is not None:
+        # Rajoitetaan temperature välille 0.0-2.0 OpenAI-standardin mukaisesti
+        temperature = max(0.0, min(2.0, float(temperature)))
+        upstream_payload["temperature"] = temperature
+    
+    if top_p is not None:
+        # Rajoitetaan top_p välille 0.0-1.0
+        top_p = max(0.0, min(1.0, float(top_p)))
+        upstream_payload["top_p"] = top_p
+    
+    if max_tokens is not None:
+        # max_tokens on positiivinen kokonaisluku
+        max_tokens = max(1, int(max_tokens))
+        upstream_payload["max_tokens"] = max_tokens
+    
+    # Lisätään tools/functions jos ne on määritetty
+    if tools:
+        upstream_payload["tools"] = tools
+    
+    if tool_choice:
+        upstream_payload["tool_choice"] = tool_choice
+    
+    # Lisätään stream-parametri jos pyydetään
+    if stream:
+        upstream_payload["stream"] = True
 
     # 1) Varmistetaan, että llm-server on hereillä
     ready = await ensure_llm_running_and_ready()
@@ -938,6 +997,9 @@ async def chat_completions(request: Request):
 
     upstream_url = f"{settings.LLM_SERVER_BASE}/v1/chat/completions"
     headers = {"Content-Type": "application/json"}
+    
+    # Konvertoitu payload JSON-muotoon
+    upstream_body = json.dumps(upstream_payload).encode("utf-8")
 
     # 2) Jos pyydetään streamausta → välitetään SSE-stream läpi
     if stream:
@@ -946,7 +1008,7 @@ async def chat_completions(request: Request):
                 async with client.stream(
                     "POST",
                     upstream_url,
-                    content=body_bytes,
+                    content=upstream_body,
                     headers=headers,
                 ) as upstream_resp:
                     async for chunk in upstream_resp.aiter_bytes():
@@ -962,7 +1024,7 @@ async def chat_completions(request: Request):
     async with httpx.AsyncClient(timeout=None) as client:
         upstream_resp = await client.post(
             upstream_url,
-            content=body_bytes,
+            content=upstream_body,
             headers=headers,
         )
 

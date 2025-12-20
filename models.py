@@ -394,10 +394,11 @@ def _clean_embedding_cache():
         del _embedding_cache[key]
 
 
-def get_cached_embeddings(model: str, texts: List[str]) -> Optional[List[List[float]]]:
+def get_cached_embeddings(model: str, texts: List[str]) -> Optional[List[Dict[str, Any]]]:
     """
     Hakee embeddings-välimuistista.
-    Palauttaa embeddingin, jos se on olemassa ja vielä voimassa.
+    Palauttaa embedding data array (array of embedding objects), 
+    jos se on olemassa ja vielä voimassa.
     """
     _clean_embedding_cache()
     key = _make_embedding_cache_key(model, texts)
@@ -409,9 +410,10 @@ def get_cached_embeddings(model: str, texts: List[str]) -> Optional[List[List[fl
     return None
 
 
-def cache_embeddings(model: str, texts: List[str], embeddings: List[List[float]]):
+def cache_embeddings(model: str, texts: List[str], embeddings: List[Dict[str, Any]]):
     """
     Tallentaa embeddings-välimuistiin.
+    Expects the data array from Ollama's response (list of embedding objects).
     """
     key = _make_embedding_cache_key(model, texts)
     _embedding_cache[key] = (time.time(), embeddings)
