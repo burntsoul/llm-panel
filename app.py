@@ -1079,7 +1079,8 @@ async def create_embeddings(request: Request):
     # 1) Tarkista cache
     cached = get_cached_embeddings(model, texts)
     if cached is not None:
-        embeddings_data = cached
+        # Cached contains the "data" array from Ollama response
+        embeddings_data_array = cached
     else:
         # 2) Varmistetaan, että llm-server on hereillä
         ready = await ensure_llm_running_and_ready()
@@ -1133,12 +1134,11 @@ async def create_embeddings(request: Request):
             
             data = upstream_resp.json()
             
-            # Ollama returns the response in correct OpenAI format already
-            # Just use it directly (it should have "object", "data", "model", "usage")
-            embeddings_data = data
+            # Extract the data array (contains embedding objects)
+            embeddings_data_array = data.get("data", [])
             
             # Cache the result
-            cache_embeddings(model, texts, data.get("data", []))
+            cache_embeddings(model, texts, embeddings_data_array)
         
         except Exception as e:
             return JSONResponse(
@@ -1151,16 +1151,15 @@ async def create_embeddings(request: Request):
                 },
             )
     
-    # 4) Return response (Ollama already returns in correct format)
-    # Just ensure model field is set correctly and add usage stats
+    # 4) Return response in OpenAI format
     response_data = {
-        "object": embeddings_data.get("object", "list"),
-        "data": embeddings_data.get("data", []),
+        "object": "list",
+        "data": embeddings_data_array,
         "model": model,
-        "usage": embeddings_data.get("usage", {
+        "usage": {
             "prompt_tokens": sum(len(t.split()) for t in texts),
             "total_tokens": sum(len(t.split()) for t in texts),
-        })
+        }
     }
     
     # If base64 encoding requested, convert embeddings
