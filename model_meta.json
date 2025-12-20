@@ -1,4 +1,8 @@
 {
+  "qwen3-vl:32b ": {
+    "source": "local",
+    "device": "cpu"
+  },
   "qwen3-vl:8b": {
     "source": "local",
     "device": "cpu"
@@ -32,6 +36,10 @@
     "device": "cpu"
   },
   "llama3.2:latest": {
+    "source": "local",
+    "device": "cpu"
+  },
+  "nomic-embed-text:latest": {
     "source": "local",
     "device": "cpu"
   }

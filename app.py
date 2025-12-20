@@ -22,6 +22,9 @@ from models import (
     get_model_display_entries,
     get_models_openai_format,
     get_model_table_status,
+    get_embedding_models_openai_format,
+    get_cached_embeddings,
+    cache_embeddings,
 )
 app = FastAPI()
 
@@ -977,3 +980,211 @@ async def chat_completions(request: Request):
         )
 
     return JSONResponse(status_code=upstream_resp.status_code, content=data)
+
+
+@app.get("/api/embedding-models")
+async def list_embedding_models():
+    """
+    Palauttaa lista saatavilla olevista embedding-malleista.
+    Sama formaatti kuin /v1/models, mutta vain embedding-mallit.
+    """
+    data = get_embedding_models_openai_format()
+    return {"object": "list", "data": data}
+
+
+@app.post("/v1/embeddings")
+async def create_embeddings(request: Request):
+    """
+    OpenAI-yhteensopiva embeddings-endpointti.
+    
+    Hyväksyy pyynnöt muodossa:
+    {
+      "model": "nomic-embed-text:latest",
+      "input": "teksti" tai ["teksti1", "teksti2"],
+      "encoding_format": "float" (oletus) tai "base64"
+    }
+    
+    Palauttaa OpenAI-muotoon embeddings-vektorit, tuetaan batch-käsittely.
+    """
+    # Luetaan request-body
+    body_bytes = await request.body()
+    try:
+        body = json.loads(body_bytes.decode("utf-8"))
+    except Exception:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": {
+                    "message": "Invalid JSON in request body",
+                    "type": "invalid_request_error",
+                }
+            },
+        )
+    
+    # Validointi: tarvitaan model ja input
+    model = body.get("model", settings.DEFAULT_EMBEDDING_MODEL).strip()
+    input_data = body.get("input")
+    encoding_format = body.get("encoding_format", "float").lower()
+    
+    if not model:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": {
+                    "message": "model field is required",
+                    "type": "invalid_request_error",
+                }
+            },
+        )
+    
+    if input_data is None:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": {
+                    "message": "input field is required",
+                    "type": "invalid_request_error",
+                }
+            },
+        )
+    
+    # Normalisoi input (voi olla string tai lista stringejä)
+    if isinstance(input_data, str):
+        texts = [input_data]
+    elif isinstance(input_data, list):
+        texts = [str(t) for t in input_data]
+    else:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": {
+                    "message": "input must be a string or array of strings",
+                    "type": "invalid_request_error",
+                }
+            },
+        )
+    
+    # Batch size -validointi
+    if len(texts) > settings.EMBEDDING_MAX_BATCH_SIZE:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": {
+                    "message": f"input array too large (max {settings.EMBEDDING_MAX_BATCH_SIZE})",
+                    "type": "invalid_request_error",
+                }
+            },
+        )
+    
+    # 1) Tarkista cache
+    cached = get_cached_embeddings(model, texts)
+    if cached is not None:
+        embeddings_data = cached
+    else:
+        # 2) Varmistetaan, että llm-server on hereillä
+        ready = await ensure_llm_running_and_ready()
+        if not ready:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": {
+                        "message": "LLM server not available",
+                        "type": "server_error",
+                    }
+                },
+            )
+        
+        # 3) Proxaa Ollaman /v1/embeddings -endpointtiin
+        upstream_url = f"{settings.LLM_SERVER_BASE}/v1/embeddings"
+        headers = {"Content-Type": "application/json"}
+        
+        # Rakenna payload Ollaman odottamassa muodossa
+        upstream_payload = {
+            "model": model,
+            "prompt": texts if len(texts) > 1 else texts[0],
+        }
+        
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                upstream_resp = await client.post(
+                    upstream_url,
+                    json=upstream_payload,
+                    headers=headers,
+                )
+            
+            if upstream_resp.status_code != 200:
+                return JSONResponse(
+                    status_code=upstream_resp.status_code,
+                    content={
+                        "error": {
+                            "message": f"Upstream embedding service returned status {upstream_resp.status_code}",
+                            "type": "server_error",
+                        }
+                    },
+                )
+            
+            data = upstream_resp.json()
+            
+            # Ollama palauttaa "embedding"-kentän yhdelle tekstille tai "embeddings"-kentän listalle
+            if "embedding" in data:
+                # Single embedding
+                embeddings_data = [data["embedding"]]
+            elif "embeddings" in data:
+                # Multiple embeddings
+                embeddings_data = data["embeddings"]
+            else:
+                return JSONResponse(
+                    status_code=502,
+                    content={
+                        "error": {
+                            "message": "Invalid response format from upstream embedding service",
+                            "type": "bad_gateway",
+                        }
+                    },
+                )
+            
+            # Cache the result
+            cache_embeddings(model, texts, embeddings_data)
+        
+        except Exception as e:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": {
+                        "message": f"Error calling embedding service: {str(e)}",
+                        "type": "server_error",
+                    }
+                },
+            )
+    
+    # 4) Format response in OpenAI format
+    response_data = {
+        "object": "list",
+        "data": [],
+        "model": model,
+        "usage": {
+            "prompt_tokens": sum(len(t.split()) for t in texts),  # rough estimate
+            "total_tokens": sum(len(t.split()) for t in texts),
+        }
+    }
+    
+    for idx, embedding_vector in enumerate(embeddings_data):
+        if encoding_format == "base64":
+            # Convert to base64 if requested (optional feature)
+            import base64
+            encoded = base64.b64encode(
+                json.dumps(embedding_vector).encode("utf-8")
+            ).decode("utf-8")
+            data_value = encoded
+        else:
+            data_value = embedding_vector
+        
+        response_data["data"].append(
+            {
+                "object": "embedding",
+                "embedding": data_value,
+                "index": idx,
+            }
+        )
+    
+    return JSONResponse(status_code=200, content=response_data)

@@ -2,7 +2,8 @@
 import time
 import os
 import json
-from typing import List, Dict, Any, Optional
+import hashlib
+from typing import List, Dict, Any, Optional, Tuple
 
 import requests
 
@@ -18,6 +19,9 @@ _cached_at: float = 0.0
 # Malli-metadatan sijainti (voit vaihtaa polkua env-muuttujalla MODEL_META_PATH)
 _MODEL_META_FILE = os.getenv("MODEL_META_PATH", "model_meta.json")
 _model_meta_cache: Optional[Dict[str, Dict[str, Any]]] = None
+
+# Embedding cache: {hash(model + texts): (timestamp, embedding_vector)}
+_embedding_cache: Dict[str, Tuple[float, List[List[float]]]] = {}
 
 
 def _load_meta() -> Dict[str, Dict[str, Any]]:
@@ -299,3 +303,115 @@ def get_model_table_status() -> List[Dict[str, Any]]:
         rows.append(row)
 
     return rows
+
+
+# ============================================================================
+# Embedding Models Support
+# ============================================================================
+
+def _detect_embedding_models() -> List[str]:
+    """
+    Yrittää havaita embedding-mallit Ollamalta.
+    Ollama ei erota chat- ja embedding-malleja /api/tags -vastauksessa,
+    joten käytämme heuristiikkaa: jos mallin nimessä on 'embed' tai 'embedding',
+    se on embedding-malli.
+    
+    Palauttaa listan embedding-mallien nimistä.
+    """
+    embedding_models = []
+    raw = _get_raw_models()
+    
+    for model in raw:
+        name = model.get("name", "").lower()
+        # Heuristiikka: jos nimessä esiintyy 'embed' tai 'vec' tai 'dense'
+        if any(keyword in name for keyword in ["embed", "embedding", "vec", "dense"]):
+            embedding_models.append(model.get("name", ""))
+    
+    return embedding_models
+
+
+def get_embedding_models_openai_format() -> List[Dict[str, Any]]:
+    """
+    Palauttaa embedding-mallilistan OpenAI-yhteensopivassa muodossa
+    /api/embedding-models -endpointtia varten.
+    """
+    embedding_models = _detect_embedding_models()
+    meta_map = _load_meta()
+    base_ts = 1730000000
+    
+    result: List[Dict[str, Any]] = []
+    
+    for idx, model_name in enumerate(embedding_models):
+        meta = meta_map.get(model_name, {})
+        source = meta.get("source", "local")
+        device = meta.get("device", "cpu")
+        
+        badge = _badge_for_meta(source, device)
+        desc = f"{model_name} [{badge}]"
+        
+        # Try to get embedding dimension if available in metadata
+        dimensions = meta.get("embedding_dimensions", 768)
+        
+        result.append(
+            {
+                "id": model_name,
+                "object": "model",
+                "created": base_ts + idx,
+                "owned_by": "llm-server",
+                "metadata": {
+                    "source": source,
+                    "device": device,
+                    "embedding_dimensions": dimensions,
+                    "type": "embedding",
+                },
+                "description": desc,
+            }
+        )
+    
+    return result
+
+
+def _make_embedding_cache_key(model: str, texts: List[str]) -> str:
+    """
+    Luo cache-avaimen embedding-pyynölle.
+    Käyttää SHA256-hashia mallin ja tekstien yhdistelmästä.
+    """
+    combined = f"{model}:{'|'.join(texts)}"
+    return hashlib.sha256(combined.encode("utf-8")).hexdigest()
+
+
+def _clean_embedding_cache():
+    """
+    Siivoa vanhentuneista embedding-välimuistin merkinnöistä.
+    """
+    global _embedding_cache
+    now = time.time()
+    expired_keys = [
+        key for key, (ts, _) in _embedding_cache.items()
+        if (now - ts) > settings.EMBEDDING_CACHE_TTL
+    ]
+    for key in expired_keys:
+        del _embedding_cache[key]
+
+
+def get_cached_embeddings(model: str, texts: List[str]) -> Optional[List[List[float]]]:
+    """
+    Hakee embeddings-välimuistista.
+    Palauttaa embeddingin, jos se on olemassa ja vielä voimassa.
+    """
+    _clean_embedding_cache()
+    key = _make_embedding_cache_key(model, texts)
+    
+    if key in _embedding_cache:
+        _, embeddings = _embedding_cache[key]
+        return embeddings
+    
+    return None
+
+
+def cache_embeddings(model: str, texts: List[str], embeddings: List[List[float]]):
+    """
+    Tallentaa embeddings-välimuistiin.
+    """
+    key = _make_embedding_cache_key(model, texts)
+    _embedding_cache[key] = (time.time(), embeddings)

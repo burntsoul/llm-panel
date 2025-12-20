@@ -120,5 +120,18 @@ class Settings:
             f"http://{self.LLM_HOST}:{self.LLM_PORT}",
         )
 
+        # -------- Embeddings --------
+        # Oletus embedding-malli (jos ei ole määritelty)
+        self.DEFAULT_EMBEDDING_MODEL = _env(
+            "DEFAULT_EMBEDDING_MODEL",
+            "nomic-embed-text:latest",
+        )
+
+        # Embedding cache TTL (sekunteina)
+        self.EMBEDDING_CACHE_TTL = _env_int("EMBEDDING_CACHE_TTL", 3600)  # 1 hour
+
+        # Max embedding batch size (kuinka monta tekstiä kerralla)
+        self.EMBEDDING_MAX_BATCH_SIZE = _env_int("EMBEDDING_MAX_BATCH_SIZE", 32)
+
 
 settings = Settings()
