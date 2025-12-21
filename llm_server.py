@@ -38,6 +38,50 @@ def llm_server_up() -> bool:
         return False
 
 
+def is_llm_ready() -> bool:
+    """
+    Check if LLM server is ready by querying the readiness endpoint.
+    This is used by lease endpoints to confirm the LLM is operational.
+    """
+    try:
+        url = f"{settings.LLM_BASE_URL}{settings.LLM_READINESS_PATH}"
+        r = requests.get(url, timeout=2.0)
+        return r.ok
+    except Exception:
+        return False
+
+
+async def wait_for_llm_ready(timeout: int | None = None) -> bool:
+    """
+    Wait for LLM readiness endpoint to respond.
+    Uses exponential backoff (start at 0.5s, max 3s between attempts).
+
+    Args:
+        timeout: Maximum time to wait in seconds
+
+    Returns:
+        True if LLM became ready, False if timeout
+    """
+    if timeout is None:
+        timeout = settings.LLM_READINESS_TIMEOUT
+
+    loop = asyncio.get_running_loop()
+    start = loop.time()
+    backoff = 0.5
+
+    while loop.time() - start < timeout:
+        ready = await loop.run_in_executor(None, is_llm_ready)
+        if ready:
+            touch_activity()
+            return True
+
+        wait_time = min(backoff, 3.0)
+        await asyncio.sleep(wait_time)
+        backoff *= 1.5
+
+    return False
+
+
 def get_llm_server_cpu_total() -> Optional[float]:
     """
     Palauttaa llm-serverin kokonais-CPU-käytön prosentteina (0-100),
@@ -138,9 +182,17 @@ async def idle_shutdown_loop() -> None:
     """
     Taustasäie, joka tarkkailee LLM:n käyttöä ja sammuttaa LLM-VM:n
     kun sitä ei ole käytetty pitkään aikaan.
-    (Huoltotilassa EI sammuta.)
+    
+    Respects active leases:
+    - If any active leases exist, VM stays ON regardless of idle time
+    - If no leases, falls back to traditional idle timeout logic
+    - Maintenance mode disables shutdown
     """
     global _last_activity
+    
+    # Import here to avoid circular dependency
+    from lease import get_lease_manager
+    
     while True:
         await asyncio.sleep(60)
 
@@ -150,6 +202,15 @@ async def idle_shutdown_loop() -> None:
         if not llm_server_up():
             continue
 
+        # Check for active leases
+        lease_mgr = get_lease_manager()
+        has_leases = lease_mgr.has_active_leases()
+        
+        if has_leases:
+            # Keep VM running if there are active leases
+            continue
+
+        # No leases; use traditional idle timeout
         idle = (datetime.datetime.utcnow() - _last_activity).total_seconds()
         if idle > settings.LLM_IDLE_SECONDS:
             # käytä lempeää shutdownia (ei force stop)

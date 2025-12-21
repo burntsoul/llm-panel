@@ -26,7 +26,12 @@ from models import (
     get_cached_embeddings,
     cache_embeddings,
 )
+from lease_api import router as lease_api_router
+
 app = FastAPI()
+
+# Include lease + proxy API
+app.include_router(lease_api_router)
 
 
 @app.on_event("startup")

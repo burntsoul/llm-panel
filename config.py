@@ -133,5 +133,40 @@ class Settings:
         # Max embedding batch size (kuinka monta tekstiä kerralla)
         self.EMBEDDING_MAX_BATCH_SIZE = _env_int("EMBEDDING_MAX_BATCH_SIZE", 32)
 
+        # -------- Lease & Proxy API --------
+        # Shared secret token for lease/proxy endpoints (required for auth)
+        self.LLM_AGENT_TOKEN = _secret("LLM_AGENT_TOKEN", "")
+
+        # LLM base URL (internal, used by proxy and readiness checks)
+        self.LLM_BASE_URL = _env(
+            "LLM_BASE_URL",
+            f"http://{self.LLM_HOST}:{self.LLM_PORT}",
+        )
+
+        # Readiness check endpoint (relative to LLM_BASE_URL)
+        # For Ollama, /api/tags or /api/version work well
+        self.LLM_READINESS_PATH = _env("LLM_READINESS_PATH", "/api/tags")
+
+        # Default lease TTL (seconds)
+        self.LEASE_DEFAULT_TTL = _env_int("LEASE_DEFAULT_TTL", 3600)  # 1 hour
+
+        # Readiness check timeout (seconds)
+        self.LLM_READINESS_TIMEOUT = _env_int("LLM_READINESS_TIMEOUT", 120)
+
+        # Readiness check polling interval (seconds)
+        self.LLM_READINESS_POLL_INTERVAL = _env_float("LLM_READINESS_POLL_INTERVAL", 2.0)
+
+        # Power modes for idle shutdown:
+        # "Off" (immediate), "Medium" (2h), "High" (30min)
+        self.POWER_MODE = _env("POWER_MODE", "Medium")
+        power_mode_timeouts = {
+            "Off": 0,
+            "Medium": 7200,  # 2 hours
+            "High": 1800,  # 30 minutes
+        }
+        self.POWER_MODE_IDLE_TIMEOUT = power_mode_timeouts.get(
+            self.POWER_MODE, 7200
+        )
+
 
 settings = Settings()
