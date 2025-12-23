@@ -261,6 +261,14 @@ async def refresh_lease(
         )
 
     lease = lease_mgr.get_lease(lease_id)
+    
+    if lease is None:
+        logger.warning(f"POST /v1/lease/{lease_id}/refresh: lease disappeared after refresh")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lease not found or expired",
+        )
+    
     touch_activity()
 
     return {

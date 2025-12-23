@@ -72,7 +72,7 @@ class Settings:
 
         # IP:t (informatiivisia; VM ohjaus tapahtuu Proxmox API:lla)
         self.PROXMOX_IP = _env("PROXMOX_IP", "192.168.8.31")
-        self.LLM_AGENT_IP = _env("LLM_AGENT_IP", "192.168.8.32")
+        self.LLM_AGENT_IP = _env("LLM_AGENT_IP", "192.168.8.36")
         self.LLM_HOST = _env("LLM_HOST", "192.168.8.33")        # llm-server (Ollama)
         self.WINDOWS_VM_IP = _env("WINDOWS_VM_IP", "192.168.8.34")
 
