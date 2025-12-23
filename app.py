@@ -940,6 +940,10 @@ async def chat_completions(request: Request):
     temperature = body.get("temperature")
     top_p = body.get("top_p")
     max_tokens = body.get("max_tokens")
+    tools = body.get("tools")
+    tool_choice = body.get("tool_choice")
+    functions = body.get("functions")
+    function_call = body.get("function_call")
 
     # Käsitellään messages - voidaan lisätä system prompt
     messages = body.get("messages") or []
@@ -957,6 +961,33 @@ async def chat_completions(request: Request):
     upstream_payload["messages"] = messages
     if "system_prompt" in upstream_payload:
         del upstream_payload["system_prompt"]
+
+    # Legacy function calling -> tools/tool_choice (OpenAI 0613 compatibility)
+    used_legacy_functions = False
+    if tools is None and isinstance(functions, list):
+        converted_tools = []
+        for f in functions:
+            if isinstance(f, dict):
+                converted_tools.append({"type": "function", "function": f})
+        if converted_tools:
+            upstream_payload["tools"] = converted_tools
+            used_legacy_functions = True
+        if "functions" in upstream_payload:
+            del upstream_payload["functions"]
+
+    if tool_choice is None and function_call is not None:
+        used_legacy_functions = True
+        if isinstance(function_call, str):
+            upstream_payload["tool_choice"] = function_call
+        elif isinstance(function_call, dict):
+            name = function_call.get("name")
+            if name:
+                upstream_payload["tool_choice"] = {
+                    "type": "function",
+                    "function": {"name": name},
+                }
+        if "function_call" in upstream_payload:
+            del upstream_payload["function_call"]
     
     # Lisätään valinnaiset parametrit jos ne on määritetty
     if temperature is not None:
@@ -1017,6 +1048,128 @@ async def chat_completions(request: Request):
         )
 
     # 3) Ei streamausta → tavallinen JSON-proxy
+    async with httpx.AsyncClient(timeout=None) as client:
+        upstream_resp = await client.post(
+            upstream_url,
+            content=upstream_body,
+            headers=headers,
+        )
+
+    try:
+        data = upstream_resp.json()
+    except Exception:
+        return JSONResponse(
+            status_code=502,
+            content={
+                "error": {
+                    "message": "Invalid response from upstream",
+                    "type": "bad_gateway",
+                }
+            },
+        )
+
+    if used_legacy_functions and isinstance(data, dict):
+        try:
+            for choice in data.get("choices", []) or []:
+                msg = choice.get("message") or {}
+                tool_calls = msg.get("tool_calls")
+                if tool_calls and "function_call" not in msg:
+                    first = tool_calls[0] if isinstance(tool_calls, list) else None
+                    func = first.get("function") if isinstance(first, dict) else None
+                    if isinstance(func, dict):
+                        msg["function_call"] = {
+                            "name": func.get("name"),
+                            "arguments": func.get("arguments"),
+                        }
+        except Exception:
+            pass
+
+    return JSONResponse(status_code=upstream_resp.status_code, content=data)
+
+
+@app.post("/v1/completions")
+async def completions(request: Request):
+    """
+    OpenAI-yhteensopiva legacy completions -endpointti.
+    Muuntaa promptin chat-muotoon ja välittää /v1/chat/completions:iin.
+    """
+    body_bytes = await request.body()
+    try:
+        body = json.loads(body_bytes.decode("utf-8"))
+    except Exception:
+        body = {}
+
+    stream = bool(body.get("stream", False))
+    temperature = body.get("temperature")
+    top_p = body.get("top_p")
+    max_tokens = body.get("max_tokens")
+
+    prompt = body.get("prompt", "")
+    if isinstance(prompt, list):
+        prompt = "\n".join(str(p) for p in prompt)
+    elif prompt is None:
+        prompt = ""
+
+    messages = [{"role": "user", "content": str(prompt)}]
+    system_prompt = body.get("system_prompt")
+    if system_prompt:
+        messages.insert(0, {"role": "system", "content": system_prompt})
+
+    upstream_payload = dict(body)
+    upstream_payload["messages"] = messages
+    if "prompt" in upstream_payload:
+        del upstream_payload["prompt"]
+    if "system_prompt" in upstream_payload:
+        del upstream_payload["system_prompt"]
+
+    if temperature is not None:
+        temperature = max(0.0, min(2.0, float(temperature)))
+        upstream_payload["temperature"] = temperature
+
+    if top_p is not None:
+        top_p = max(0.0, min(1.0, float(top_p)))
+        upstream_payload["top_p"] = top_p
+
+    if max_tokens is not None:
+        max_tokens = max(1, int(max_tokens))
+        upstream_payload["max_tokens"] = max_tokens
+
+    if stream:
+        upstream_payload["stream"] = True
+
+    ready = await ensure_llm_running_and_ready()
+    if not ready:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": {
+                    "message": "LLM server not available",
+                    "type": "server_error",
+                }
+            },
+        )
+
+    upstream_url = f"{settings.LLM_SERVER_BASE}/v1/chat/completions"
+    headers = {"Content-Type": "application/json"}
+    upstream_body = json.dumps(upstream_payload).encode("utf-8")
+
+    if stream:
+        async def stream_from_upstream():
+            async with httpx.AsyncClient(timeout=None) as client:
+                async with client.stream(
+                    "POST",
+                    upstream_url,
+                    content=upstream_body,
+                    headers=headers,
+                ) as upstream_resp:
+                    async for chunk in upstream_resp.aiter_bytes():
+                        yield chunk
+
+        return StreamingResponse(
+            stream_from_upstream(),
+            media_type="text/event-stream",
+        )
+
     async with httpx.AsyncClient(timeout=None) as client:
         upstream_resp = await client.post(
             upstream_url,
