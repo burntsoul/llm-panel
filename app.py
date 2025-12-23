@@ -940,13 +940,11 @@ async def chat_completions(request: Request):
     temperature = body.get("temperature")
     top_p = body.get("top_p")
     max_tokens = body.get("max_tokens")
-    tools = body.get("tools")
-    tool_choice = body.get("tool_choice")
-    
+
     # Käsitellään messages - voidaan lisätä system prompt
-    messages = body.get("messages", [])
+    messages = body.get("messages") or []
     system_prompt = body.get("system_prompt")
-    
+
     # Jos system_prompt on annettu eikä messages sisällä system-roolia,
     # lisätään se messages-listan alkuun
     if system_prompt:
@@ -954,11 +952,11 @@ async def chat_completions(request: Request):
         if not has_system:
             messages.insert(0, {"role": "system", "content": system_prompt})
     
-    # Rakennetaan upstream-payload
-    upstream_payload = {
-        "model": body.get("model"),
-        "messages": messages,
-    }
+    # Rakennetaan upstream-payload; säilytä myös tuntemattomat kentät
+    upstream_payload = dict(body)
+    upstream_payload["messages"] = messages
+    if "system_prompt" in upstream_payload:
+        del upstream_payload["system_prompt"]
     
     # Lisätään valinnaiset parametrit jos ne on määritetty
     if temperature is not None:
@@ -975,13 +973,6 @@ async def chat_completions(request: Request):
         # max_tokens on positiivinen kokonaisluku
         max_tokens = max(1, int(max_tokens))
         upstream_payload["max_tokens"] = max_tokens
-    
-    # Lisätään tools/functions jos ne on määritetty
-    if tools:
-        upstream_payload["tools"] = tools
-    
-    if tool_choice:
-        upstream_payload["tool_choice"] = tool_choice
     
     # Lisätään stream-parametri jos pyydetään
     if stream:
