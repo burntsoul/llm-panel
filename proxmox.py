@@ -35,7 +35,7 @@ class ProxmoxClient:
     ) -> None:
         if not token_id or not token_secret:
             raise ProxmoxError(
-                "Proxmox token puuttuu. Täytä secrets.py: PROXMOX_TOKEN_ID ja PROXMOX_TOKEN_SECRET."
+                "Proxmox token puuttuu. Täytä llm_secrets.py: PROXMOX_TOKEN_ID ja PROXMOX_TOKEN_SECRET."
             )
 
         self.base = f"https://{host}:{port}/api2/json"

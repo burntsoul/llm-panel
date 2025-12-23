@@ -41,33 +41,25 @@
    - Support scripts
 
 ### Documentation (4 files)
-7. **LEASE_API_IMPLEMENTATION.md** (200+ lines)
+7. **implementation.md** (200+ lines)
    - Complete implementation overview
    - Architecture explanation
    - Feature summary
-   - Deployment checklist
 
-8. **LEASE_API_REFERENCE.md** (250+ lines)
-   - Quick reference guide
+8. **reference.md** (250+ lines)
    - API endpoint documentation
    - Configuration parameters
-   - Python client library
+   - Client examples
    - Troubleshooting guide
 
-9. **IMPLEMENTATION_SUMMARY.md** (150+ lines)
-   - Project summary
-   - What was implemented
-   - Key features
-   - Quick start guide
+9. **../ops/deployment_checklist.md** (200+ lines)
+   - Step-by-step deployment guide
+   - Verification procedures
+   - Troubleshooting
+   - Monitoring commands
+   - Success criteria
 
-10. **DEPLOYMENT_CHECKLIST.md** (200+ lines)
-    - Step-by-step deployment guide
-    - Verification procedures
-    - Troubleshooting
-    - Monitoring commands
-    - Success criteria
-
-11. **CHANGES.md** (this file)
+10. **file_inventory.md** (this file)
     - File inventory
     - Modification summary
     - Integration points
@@ -82,7 +74,7 @@
 
 ### 2. config.py
 - Added 10 new configuration parameters in `Settings.__init__()`:
-  - `LLM_AGENT_TOKEN` - Shared secret (via secrets.py or env)
+  - `LLM_AGENT_TOKEN` - Shared secret (via llm_secrets.py or env; empty disables auth)
   - `LLM_BASE_URL` - Internal LLM URL (default: http://192.168.8.33:11434)
   - `LLM_READINESS_PATH` - Readiness check endpoint (default: /api/tags)
   - `LEASE_DEFAULT_TTL` - Default lease duration (default: 3600s)
@@ -114,7 +106,7 @@
 ## API Endpoints Added
 
 ### Lease Management (/v1)
-- `POST /v1/lease` - Create/get lease
+- `POST /v1/lease` - Create lease
 - `GET /v1/lease/{lease_id}` - Get lease status
 - `POST /v1/lease/{lease_id}/refresh` - Extend lease
 - `POST /v1/lease/{lease_id}/release` - Remove lease
@@ -233,17 +225,15 @@ python3 test_lease_integration.py  # Integration tests (with pytest)
 ```
 
 ### API Documentation
-- **Reference**: LEASE_API_REFERENCE.md
-- **Implementation**: LEASE_API_IMPLEMENTATION.md
-- **Deployment**: DEPLOYMENT_CHECKLIST.md
-- **Summary**: IMPLEMENTATION_SUMMARY.md
+- **Reference**: reference.md
+- **Implementation**: implementation.md
+- **Deployment**: ../ops/deployment_checklist.md
 
 ## Support
 
 For detailed information, see:
-- Configuration: LEASE_API_IMPLEMENTATION.md
-- API Usage: LEASE_API_REFERENCE.md
-- Deployment: DEPLOYMENT_CHECKLIST.md
-- Implementation: IMPLEMENTATION_SUMMARY.md
+- Configuration: implementation.md
+- API Usage: reference.md
+- Deployment: ../ops/deployment_checklist.md
 
 All files are documented and ready for production use.

@@ -1,5 +1,7 @@
 # Migration notes: LO100 -> Proxmox VM control
 
+Brief: LLM-agent now controls Proxmox VMs via the Proxmox VE API instead of powering the bare-metal host.
+
 Tässä versiossa LLM-agent ei enää käynnistä/sammuta koko rautapalvelinta (LO100),
 vaan ohjaa **Proxmoxissa pyöriviä VM:iä** Proxmox VE REST API:n kautta.
 
@@ -30,9 +32,9 @@ Huoltotila estää:
 
 UI:ssa on nappi huoltotilan togglaamiseen.
 
-Huoltotila tallennetaan state-fileen:
+Huoltotila tallennetaan state-fileen (oletus: repo-kansiossa `state.json`).
+Polun voi muuttaa env:llä STATE_PATH, esim:
   /var/lib/llm-agent/state.json
-polkua voi muuttaa env:llä AGENT_STATE_FILE.
 
 ## iLO/IPMI (valinnainen)
 

@@ -21,7 +21,7 @@ A robust lease and HTTP proxy system has been added to the llm-agent project. Th
 3. **lease_api.py** (400+ lines)
    - FastAPI router with all lease and proxy endpoints
    - Endpoints:
-     - `POST /v1/lease` - Create/get lease (with concurrent warmup)
+     - `POST /v1/lease` - Create lease (with concurrent warmup)
      - `GET /v1/lease/{lease_id}` - Get lease status
      - `POST /v1/lease/{lease_id}/refresh` - Extend lease TTL
      - `POST /v1/lease/{lease_id}/release` - Remove lease
@@ -34,13 +34,13 @@ A robust lease and HTTP proxy system has been added to the llm-agent project. Th
    - Unit tests for `Lease` class
    - Unit tests for `LeaseManager` class
    - Tests for persistence, expiry, refresh, serialization
-   - Run with: `python -m pytest test_lease.py -v`
+   - Run with: `python3 test_lease.py`
 
 5. **test_lease_integration.py** (400+ lines)
    - Integration tests for all API endpoints
    - Tests authentication, authorization, and error handling
    - Tests proxy forwarding and lease lifecycle
-   - Run with: `python -m pytest test_lease_integration.py -v`
+   - Run with: `python3 test_lease_integration.py`
 
 ### Configuration & Setup
 
@@ -53,13 +53,17 @@ A robust lease and HTTP proxy system has been added to the llm-agent project. Th
 
 ### Documentation
 
-7. **LEASE_API.md** (500+ lines)
-   - Comprehensive API documentation
+7. **reference.md**
+   - API documentation and examples
    - Configuration guide
-   - Client library example with full source code
-   - Lifecycle examples
-   - Troubleshooting guide
-   - Security considerations
+   - Troubleshooting
+
+8. **../ops/deployment_checklist.md**
+   - Deployment verification checklist
+   - Operational validation steps
+
+9. **file_inventory.md**
+   - File inventory and integration points
 
 ## Files Modified
 
@@ -69,7 +73,7 @@ A robust lease and HTTP proxy system has been added to the llm-agent project. Th
 
 ### 2. **config.py**
 - Added 10 new configuration parameters:
-  - `LLM_AGENT_TOKEN` - Shared secret for auth
+  - `LLM_AGENT_TOKEN` - Shared secret for auth (empty disables auth)
   - `LLM_BASE_URL` - Internal LLM server URL
   - `LLM_READINESS_PATH` - Endpoint to check readiness
   - `LEASE_DEFAULT_TTL` - Default lease time-to-live
@@ -157,74 +161,19 @@ sudo systemctl restart llm-agent-prod.service
 
 ## Usage Example
 
-```python
-import requests
-import time
-
-BASE_URL = "http://llm-agent:8000"
-TOKEN = "your-secret-token"
-
-headers = {"Authorization": f"Bearer {TOKEN}"}
-
-# 1. Create lease (VM auto-starts if needed)
-response = requests.post(
-    f"{BASE_URL}/v1/lease",
-    json={
-        "client_id": "my-app",
-        "purpose": "chat",
-        "ttl_seconds": 3600,
-    },
-    headers=headers,
-)
-lease_data = response.json()
-lease_id = lease_data["lease_id"]
-
-# Handle startup delay if needed
-if response.status_code == 202:
-    time.sleep(5)  # Wait for startup
-    # Retry or check status
-
-# 2. Use proxy to make requests
-response = requests.post(
-    f"{BASE_URL}/v1/proxy/v1/chat/completions",
-    json={
-        "model": "llama2",
-        "messages": [{"role": "user", "content": "Hello!"}],
-    },
-    headers={**headers, "X-Lease-Id": lease_id},
-)
-print(response.json())
-
-# 3. Keep lease alive periodically
-requests.post(
-    f"{BASE_URL}/v1/lease/{lease_id}/refresh",
-    json={"ttl_seconds": 3600},
-    headers=headers,
-)
-
-# 4. Release when done (optional)
-requests.post(
-    f"{BASE_URL}/v1/lease/{lease_id}/release",
-    headers=headers,
-)
-```
+See `reference.md` for API usage and examples.
 
 ## Testing
 
 ### Unit Tests
 ```bash
-cd llm-agent
-python -m pytest test_lease.py -v
+python3 test_lease.py
 ```
-
-Expected output: All tests pass (LeaseManager persistence, expiry, refresh)
 
 ### Integration Tests
 ```bash
-python -m pytest test_lease_integration.py -v
+python3 test_lease_integration.py
 ```
-
-Expected output: All endpoint tests pass (create, get, refresh, release, proxy)
 
 ## Backward Compatibility
 
@@ -281,7 +230,7 @@ Possible additions (not included in current implementation):
 
 ## Support & Troubleshooting
 
-See [LEASE_API.md](LEASE_API.md) for:
+See `reference.md` for:
 - Detailed API documentation
 - Complete client library example
 - Configuration reference

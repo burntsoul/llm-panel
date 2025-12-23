@@ -41,9 +41,9 @@
 - [x] No migration required
 
 ### Documentation
-- [x] IMPLEMENTATION_SUMMARY.md - Overview + checklist
-- [x] LEASE_API_IMPLEMENTATION.md - Detailed implementation guide
-- [x] LEASE_API_REFERENCE.md - API reference + examples
+- [x] ../lease/implementation.md - Detailed implementation guide
+- [x] ../lease/reference.md - API reference + examples
+- [x] ../lease/file_inventory.md - File inventory + integration points
 - [x] Python client library code included
 - [x] Usage examples and troubleshooting
 
@@ -198,9 +198,9 @@ curl -s -X POST http://localhost:8000/v1/lease/$LEASE/release \
 - [ ] Firewall rules in place
 
 ### Documentation Checklist
-- [ ] IMPLEMENTATION_SUMMARY.md reviewed
-- [ ] LEASE_API_IMPLEMENTATION.md available
-- [ ] LEASE_API_REFERENCE.md accessible
+- [ ] ../lease/implementation.md reviewed
+- [ ] ../lease/reference.md accessible
+- [ ] ../lease/file_inventory.md accessible
 - [ ] Token documented and shared securely
 - [ ] Team trained on new endpoints
 
@@ -306,9 +306,9 @@ After deployment, verify:
 
 ## Support Resources
 
-1. **API Reference**: LEASE_API_REFERENCE.md
-2. **Implementation Details**: LEASE_API_IMPLEMENTATION.md
-3. **Python Client**: See llm_client.py in LEASE_API_REFERENCE.md
+1. **API Reference**: ../lease/reference.md
+2. **Implementation Details**: ../lease/implementation.md
+3. **Client Examples**: See ../lease/reference.md
 4. **Test Suite**: test_lease.py, test_lease_integration.py
 5. **Configuration**: See config.py for all parameters
 6. **Logs**: `journalctl -u llm-agent-prod -f`

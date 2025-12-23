@@ -11,7 +11,7 @@ except Exception:
 
 
 def _secret(name: str, default: str = "") -> str:
-    """Read a secret value from secrets.py first, then env vars, then default."""
+    """Read a secret value from llm_secrets.py first, then env vars, then default."""
     if secrets is not None and hasattr(secrets, name):
         v = getattr(secrets, name)
         if v is None:
@@ -50,7 +50,7 @@ class Settings:
     Yksi paikka kaikille asetuksille.
 
     - Ei-salaiset arvot: config.py (oletukset + env override)
-    - Salaisuudet: secrets.py (ensin), muuten env
+    - Salaisuudet: llm_secrets.py (ensin), muuten env
     """
 
     def __init__(self) -> None:
@@ -80,7 +80,7 @@ class Settings:
         self.ENFORCE_EXCLUSIVE_VMS = _env_bool("ENFORCE_EXCLUSIVE_VMS", True)
 
         # -------- iLO / IPMI (vain status, ei pakko) --------
-        # (täytä secrets.py:hin jos haluat sensorit mukaan)
+        # (täytä llm_secrets.py:hin jos haluat sensorit mukaan)
         self.ILO_IP = _secret("ILO_IP", _env("ILO_IP", ""))
         self.ILO_USER = _secret("ILO_USER", _env("ILO_USER", ""))
         self.ILO_PASS = _secret("ILO_PASS", _env("ILO_PASS", ""))

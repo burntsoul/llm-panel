@@ -24,7 +24,8 @@ The Lease + Proxy API enables external applications to safely use the LLM server
 
 ## Authentication
 
-All lease and proxy endpoints require **Bearer token authentication**.
+If `LLM_AGENT_TOKEN` is set, lease and proxy endpoints require **Bearer token authentication**.
+If it is empty/unset, auth is disabled for all endpoints (not recommended).
 
 ### Headers
 ```http
@@ -36,7 +37,7 @@ Authorization: Bearer YOUR_TOKEN_HERE
 # Generate a new token
 python3 setup_lease_api.py --generate-token
 
-# Store in environment or secrets.py
+# Store in environment or llm_secrets.py
 export LLM_AGENT_TOKEN="your-generated-token"
 ```
 
@@ -45,7 +46,7 @@ If `LLM_AGENT_TOKEN` is empty/not set, auth is disabled. This is NOT RECOMMENDED
 
 ## Configuration
 
-### Required Settings
+### Auth Settings (recommended)
 ```bash
 # Shared secret token for authentication
 export LLM_AGENT_TOKEN="your-secret-token-here"
@@ -81,7 +82,9 @@ export POWER_MODE="Medium"
 
 ## API Reference
 
-### 1. Create/Get Lease - POST /v1/lease
+### 1. Create Lease - POST /v1/lease
+
+Each call creates a new lease. Use refresh to extend an existing lease.
 
 **Request**:
 ```json
@@ -112,6 +115,8 @@ export POWER_MODE="Medium"
   "message": "LLM is starting, please retry"
 }
 ```
+
+If you keep receiving 202, check `/v1/health` and the llm-agent logs.
 
 ### 2. Get Lease - GET /v1/lease/{lease_id}
 
@@ -152,6 +157,8 @@ export POWER_MODE="Medium"
 
 ### 5. Health Check - GET /v1/health
 
+Auth is required only when `LLM_AGENT_TOKEN` is set.
+
 **Response**:
 ```json
 {
@@ -163,13 +170,17 @@ export POWER_MODE="Medium"
 }
 ```
 
+`vm_state` is typically `running` or `stopped`, but may include an error string if the Proxmox status lookup fails.
+
 ### 6. Proxy - {GET|POST|PUT|PATCH|DELETE} /v1/proxy/{path}
 
-Forwards requests to LLM with optional `X-Lease-Id` header.
+Forwards requests to the LLM with optional `X-Lease-Id` header.
+The proxy does not start the LLM VM; call `/v1/lease` first to warm up.
+If `X-Lease-Id` is provided, it must be valid or the proxy returns 403.
 
 ## Client Library Example
 
-See `llm_client.py` in the project for a complete Python client implementation.
+Use standard HTTP clients (requests/httpx/curl). The API is intentionally simple.
 
 ## Quick Usage Examples
 
@@ -182,7 +193,7 @@ BASE = "http://localhost:8000"
 TOKEN = "your-token"
 headers = {"Authorization": f"Bearer {TOKEN}"}
 
-# Create lease
+# Create lease (returns 201 if ready or 202 if still warming)
 response = requests.post(
     f"{BASE}/v1/lease",
     json={"client_id": "app", "purpose": "chat", "ttl_seconds": 3600},
@@ -209,6 +220,7 @@ requests.post(f"{BASE}/v1/lease/{lease_id}/release", headers=headers)
 - Generate new token: `python3 setup_lease_api.py --generate-token`
 
 ### 503 LLM Not Ready
+- Call `POST /v1/lease` first to warm up the VM
 - Check readiness: `curl http://192.168.8.33:11434/api/tags`
 - Verify VM is running: `qm status 101`
 - Check network: `ping 192.168.8.33`

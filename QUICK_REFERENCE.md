@@ -128,11 +128,10 @@ python3 test_lease.py
 ## 📚 Documentation Map
 
 - **Quick Start**: This file
-- **API Reference**: [LEASE_API_REFERENCE.md](LEASE_API_REFERENCE.md)
-- **Implementation**: [LEASE_API_IMPLEMENTATION.md](LEASE_API_IMPLEMENTATION.md)
-- **Deployment**: [DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)
-- **Summary**: [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)
-- **Changes**: [CHANGES.md](CHANGES.md)
+- **API Reference**: [docs/lease/reference.md](docs/lease/reference.md)
+- **Implementation**: [docs/lease/implementation.md](docs/lease/implementation.md)
+- **Deployment**: [docs/ops/deployment_checklist.md](docs/ops/deployment_checklist.md)
+- **Changes**: [docs/lease/file_inventory.md](docs/lease/file_inventory.md)
 
 ## 🐛 Troubleshooting
 
