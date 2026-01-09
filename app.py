@@ -1359,6 +1359,68 @@ async def completions(request: Request):
     OpenAI-yhteensopiva legacy completions -endpointti.
     Muuntaa promptin chat-muotoon ja välittää /v1/chat/completions:iin.
     """
+    def _chat_to_completion_response(payload: dict) -> dict:
+        """Map chat-completions response to legacy completions response."""
+        if not isinstance(payload, dict):
+            return payload
+
+        choices_out = []
+        for choice in payload.get("choices", []) or []:
+            if not isinstance(choice, dict):
+                continue
+            msg = choice.get("message") or {}
+            if not isinstance(msg, dict):
+                msg = {}
+            text = msg.get("content")
+            if text is None:
+                delta = choice.get("delta") or {}
+                if isinstance(delta, dict):
+                    text = delta.get("content")
+            choices_out.append(
+                {
+                    "index": choice.get("index", 0),
+                    "text": text or "",
+                    "finish_reason": choice.get("finish_reason"),
+                }
+            )
+
+        return {
+            "id": payload.get("id"),
+            "object": "text_completion",
+            "created": payload.get("created"),
+            "model": payload.get("model"),
+            "choices": choices_out,
+            "usage": payload.get("usage"),
+        }
+
+    def _chat_chunk_to_completion_chunk(payload: dict) -> dict:
+        """Map a chat-completions stream chunk to legacy completion chunk."""
+        if not isinstance(payload, dict):
+            return payload
+
+        choices_out = []
+        for choice in payload.get("choices", []) or []:
+            if not isinstance(choice, dict):
+                continue
+            delta = choice.get("delta") or {}
+            if not isinstance(delta, dict):
+                delta = {}
+            text = delta.get("content") or ""
+            choices_out.append(
+                {
+                    "index": choice.get("index", 0),
+                    "text": text,
+                    "finish_reason": choice.get("finish_reason"),
+                }
+            )
+
+        return {
+            "id": payload.get("id"),
+            "object": "text_completion",
+            "created": payload.get("created"),
+            "model": payload.get("model"),
+            "choices": choices_out,
+        }
     body_bytes = await request.body()
     try:
         body = json.loads(body_bytes.decode("utf-8"))
@@ -1421,6 +1483,7 @@ async def completions(request: Request):
 
     if stream:
         async def stream_from_upstream():
+            buffer = b""
             async with httpx.AsyncClient(timeout=None) as client:
                 async with client.stream(
                     "POST",
@@ -1429,12 +1492,27 @@ async def completions(request: Request):
                     headers=headers,
                 ) as upstream_resp:
                     async for chunk in upstream_resp.aiter_bytes():
-                        yield chunk
+                        buffer += chunk
+                        while b"\n" in buffer:
+                            line, buffer = buffer.split(b"\n", 1)
+                            line = line.strip()
+                            if not line:
+                                continue
+                            if not line.startswith(b"data:"):
+                                continue
+                            data = line[5:].strip()
+                            if data == b"[DONE]":
+                                yield b"data: [DONE]\n\n"
+                                return
+                            try:
+                                payload = json.loads(data.decode("utf-8"))
+                            except Exception:
+                                continue
+                            mapped = _chat_chunk_to_completion_chunk(payload)
+                            out = json.dumps(mapped).encode("utf-8")
+                            yield b"data: " + out + b"\n\n"
 
-        return StreamingResponse(
-            stream_from_upstream(),
-            media_type="text/event-stream",
-        )
+        return StreamingResponse(stream_from_upstream(), media_type="text/event-stream")
 
     async with httpx.AsyncClient(timeout=None) as client:
         upstream_resp = await client.post(
@@ -1456,7 +1534,8 @@ async def completions(request: Request):
             },
         )
 
-    return JSONResponse(status_code=upstream_resp.status_code, content=data)
+    mapped = _chat_to_completion_response(data)
+    return JSONResponse(status_code=upstream_resp.status_code, content=mapped)
 
 
 @app.get("/api/embedding-models")
@@ -2415,4 +2494,3 @@ def image_edit_tool():
     return HTMLResponse(
         html.replace("__DEFAULT_CHECKPOINT__", settings.COMFYUI_DEFAULT_CHECKPOINT or "")
     )
-
