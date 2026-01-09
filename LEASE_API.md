@@ -1,4 +1,3 @@
-# Lease + Proxy API
 
 This document is now maintained at:
 

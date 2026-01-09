@@ -1,0 +1,196 @@
+{
+  "1": {
+    "inputs": {
+      "ckpt_name": "hyper3dInpaintingSDXL_v10.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple"
+  },
+  "2": {
+    "inputs": {
+      "text": "refine the image while preserving layout, clean monochrome wireframe",
+      "clip": [
+        "1",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "3": {
+    "inputs": {
+      "text": "photorealistic, illustration, 3d, shadows, gradients, texture, blur, perspective",
+      "clip": [
+        "1",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "4": {
+    "inputs": {
+      "image": "wireframe.png"
+    },
+    "class_type": "LoadImage"
+  },
+  "5": {
+    "inputs": {
+      "image": "mask.png"
+    },
+    "class_type": "LoadImage"
+  },
+  "6": {
+    "inputs": {
+      "channel": "red",
+      "image": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "ImageToMask"
+  },
+  "7": {
+    "inputs": {
+      "mask": [
+        "6",
+        0
+      ],
+      "expand": 8,
+      "tapered_corners": true
+    },
+    "class_type": "GrowMask"
+  },
+  "8": {
+    "inputs": {
+      "positive": [
+        "2",
+        0
+      ],
+      "negative": [
+        "3",
+        0
+      ],
+      "vae": [
+        "13",
+        0
+      ],
+      "pixels": [
+        "4",
+        0
+      ],
+      "mask": [
+        "7",
+        0
+      ],
+      "noise_mask": true
+    },
+    "class_type": "InpaintModelConditioning"
+  },
+  "9": {
+    "inputs": {
+      "seed": 0,
+      "steps": 30,
+      "cfg": 6,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 0.7,
+      "model": [
+        "1",
+        0
+      ],
+      "positive": [
+        "8",
+        0
+      ],
+      "negative": [
+        "8",
+        1
+      ],
+      "latent_image": [
+        "8",
+        2
+      ]
+    },
+    "class_type": "KSampler"
+  },
+  "10": {
+    "inputs": {
+      "ckpt_name": "sd_xl_refiner_1.0.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple"
+  },
+  "11": {
+    "inputs": {
+      "seed": 0,
+      "steps": 15,
+      "cfg": 5,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 0.2,
+      "model": [
+        "10",
+        0
+      ],
+      "positive": [
+        "15",
+        0
+      ],
+      "negative": [
+        "16",
+        0
+      ],
+      "latent_image": [
+        "9",
+        0
+      ]
+    },
+    "class_type": "KSampler"
+  },
+  "15": {
+    "inputs": {
+      "text": "refine the image while preserving layout, clean monochrome wireframe",
+      "clip": [
+        "10",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "16": {
+    "inputs": {
+      "text": "photorealistic, illustration, 3d, shadows, gradients, texture, blur, perspective",
+      "clip": [
+        "10",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "12": {
+    "inputs": {
+      "samples": [
+        "11",
+        0
+      ],
+      "vae": [
+        "13",
+        0
+      ]
+    },
+    "class_type": "VAEDecode"
+  },
+  "13": {
+    "inputs": {
+      "vae_name": "sdxl_vae.safetensors"
+    },
+    "class_type": "VAELoader"
+  },
+  "14": {
+    "inputs": {
+      "filename_prefix": "ui-inpaint",
+      "images": [
+        "12",
+        0
+      ]
+    },
+    "class_type": "SaveImage"
+  }
+}

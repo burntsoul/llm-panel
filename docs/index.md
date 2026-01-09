@@ -10,6 +10,7 @@
 - API reference and examples: `lease/reference.md`
 - Implementation details: `lease/implementation.md`
 - File inventory: `lease/file_inventory.md`
+ - Image generation (ComfyUI): `lease/reference.md`
 
 ## Operations
 

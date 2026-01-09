@@ -78,6 +78,38 @@ export LLM_READINESS_POLL_INTERVAL="2.0"
 # Idle shutdown mode: "Off", "Medium" (2h), or "High" (30min)
 # Default: Medium
 export POWER_MODE="Medium"
+
+# ComfyUI (image generation)
+export COMFYUI_BASE_URL="http://192.168.8.33:8188"
+export COMFYUI_WORKFLOW_PATH="/home/teemu/llm-agent/assets/comfyui_txt2img.json"
+export COMFYUI_EDIT_WORKFLOW_PATH="/home/teemu/llm-agent/assets/comfyui_img2img.json"
+export COMFYUI_INPAINT_WORKFLOW_PATH="/home/teemu/llm-agent/assets/comfyui_inpaint.json"
+export COMFYUI_INPAINT_VAE_NAME="sdxl_vae.safetensors"
+export COMFYUI_INPAINT_REFINER_NAME="sd_xl_refiner_1.0.safetensors"
+export COMFYUI_INPAINT_REFINER_DENOISE="0.2"
+export COMFYUI_INPAINT_REFINER_STEPS="15"
+export COMFYUI_DEFAULT_CHECKPOINT="sd_xl_base_1.0.safetensors"
+export COMFYUI_IDLE_SECONDS="600"
+
+# Workflow node IDs (if you customize the template)
+export COMFYUI_NODE_CHECKPOINT="1"
+export COMFYUI_NODE_POSITIVE="2"
+export COMFYUI_NODE_NEGATIVE="3"
+export COMFYUI_NODE_LATENT="4"
+export COMFYUI_NODE_SAMPLER="5"
+
+# Optional: enable systemd control over SSH (on-demand start/stop)
+export COMFYUI_SSH_ENABLED="true"
+export COMFYUI_SSH_HOST="192.168.8.33"
+export COMFYUI_SSH_USER="teemu"
+export COMFYUI_SSH_KEY="/home/teemu/.ssh/id_ed25519"
+export COMFYUI_SERVICE_NAME="comfyui.service"
+export COMFYUI_SSH_USE_SUDO="true"
+export COMFYUI_SYSTEMCTL_PATH="/usr/bin/systemctl"
+
+# Logging
+export LOG_LEVEL="INFO"
+export LOG_FILE="/home/teemu/llm-agent/logs/llm-agent.log"
 ```
 
 ## API Reference
@@ -177,6 +209,99 @@ Auth is required only when `LLM_AGENT_TOKEN` is set.
 Forwards requests to the LLM with optional `X-Lease-Id` header.
 The proxy does not start the LLM VM; call `/v1/lease` first to warm up.
 If `X-Lease-Id` is provided, it must be valid or the proxy returns 403.
+
+### 7. Image Generation - POST /v1/images/generations
+
+OpenAI-compatible image generation endpoint backed by ComfyUI.
+
+**Request**:
+```json
+{
+  "prompt": "a photorealistic cabin in the snow",
+  "negative_prompt": "blurry, low quality",
+  "size": "1024x1024",
+  "n": 1,
+  "steps": 20,
+  "cfg_scale": 7,
+  "seed": 1234,
+  "response_format": "b64_json"
+}
+```
+
+**Response**:
+```json
+{
+  "created": 1700000000,
+  "data": [
+    { "b64_json": "..." }
+  ]
+}
+```
+
+Notes:
+- `response_format` supports `b64_json` (default) or `url`.
+- `model` can be used to override `COMFYUI_DEFAULT_CHECKPOINT`.
+- When `COMFYUI_SSH_ENABLED=true`, the agent starts/stops the ComfyUI systemd service on demand.
+
+### 8. Image Edits - POST /v1/images/edits
+
+OpenAI-compatible image edits endpoint (img2img) backed by ComfyUI.
+
+**Request** (multipart/form-data):
+- `image` (file, required)
+- `mask` (file, optional; white=edit, black=keep)
+- `prompt` (text, optional)
+- `model` (checkpoint name, optional)
+- `denoise` (float, optional; default from COMFYUI_EDIT_DENOISE)
+- `n` (int, optional; number of variations)
+
+**JSON alternative** (for clients that cannot upload files):
+```json
+{
+  "image_b64": "<base64>",
+  "mask_b64": "<base64>",
+  "prompt": "refine layout",
+  "n": 2
+}
+```
+
+**Response**:
+```json
+{
+  "created": 1700000000,
+  "data": [
+    { "b64_json": "..." }
+  ]
+}
+```
+
+### 9. Image Variations - POST /v1/images/variations
+
+OpenAI-compatible image variations endpoint (uses img2img).
+
+**Request** (multipart/form-data):
+- `image` (file, required)
+- `model` (checkpoint name, optional)
+- `n` (int, optional; number of variations)
+- `response_format` (b64_json or url)
+
+**JSON alternative**:
+```json
+{
+  "image_b64": "<base64>",
+  "n": 2
+}
+```
+
+**Response**:
+```json
+{
+  "created": 1700000000,
+  "data": [
+    { "b64_json": "..." }
+  ]
+}
+```
 
 ## Client Library Example
 

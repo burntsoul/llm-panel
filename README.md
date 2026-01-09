@@ -1,6 +1,6 @@
 # LLM Agent
 
-LLM Agent is a small control plane for a homelab LLM setup: it manages Proxmox VMs, enforces GPU passthrough exclusivity, and proxies OpenAI-compatible requests to Ollama.
+LLM Agent is a small control plane for a homelab LLM setup: it manages Proxmox VMs, enforces GPU passthrough exclusivity, and proxies OpenAI-compatible requests to Ollama. It can also proxy OpenAI image generation requests to ComfyUI with on-demand startup.
 
 ## Quick Start
 

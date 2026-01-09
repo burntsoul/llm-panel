@@ -63,6 +63,41 @@ curl -X POST http://localhost:8000/v1/proxy/v1/chat/completions \
   -d '{"model": "llama2", "messages": [{"role": "user", "content": "Hi!"}]}'
 ```
 
+### Image Generation (ComfyUI)
+```bash
+curl -X POST http://localhost:8000/v1/images/generations \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "a cinematic portrait, 50mm",
+    "size": "1024x1024",
+    "n": 1,
+    "steps": 20,
+    "cfg_scale": 7,
+    "response_format": "b64_json"
+  }'
+```
+
+### Image Edit (ComfyUI)
+```bash
+curl -X POST http://localhost:8000/v1/images/edits \
+  -F "image=@wireframe.png" \
+  -F "mask=@mask.png" \
+  -F "prompt=clean monochrome wireframe, preserve layout" \
+  -F "n=2" \
+  -F "denoise=0.35" \
+  -F "response_format=b64_json"
+```
+
+JSON base64 alternative:
+```json
+{
+  "image_b64": "<base64>",
+  "mask_b64": "<base64>",
+  "prompt": "clean monochrome wireframe, preserve layout",
+  "n": 2
+}
+```
+
 ## 🐍 Python Usage
 
 ```python
@@ -104,6 +139,18 @@ requests.post(
 | `LEASE_DEFAULT_TTL` | `3600` | Default lease duration |
 | `LLM_READINESS_TIMEOUT` | `120` | VM warmup timeout |
 | `POWER_MODE` | `Medium` | Idle shutdown (Off/Medium/High) |
+| `COMFYUI_BASE_URL` | `http://192.168.8.33:8188` | ComfyUI base URL |
+| `COMFYUI_IDLE_SECONDS` | `600` | ComfyUI idle shutdown |
+| `COMFYUI_WORKFLOW_PATH` | `assets/comfyui_txt2img.json` | Workflow template |
+| `COMFYUI_DEFAULT_CHECKPOINT` | (empty) | Default checkpoint name |
+| `COMFYUI_SSH_ENABLED` | `false` | Enable SSH service control |
+| `COMFYUI_SSH_USER` | (empty) | SSH user on llm-server |
+| `COMFYUI_SSH_KEY` | (empty) | SSH private key for llm-server |
+| `COMFYUI_SERVICE_NAME` | `comfyui.service` | Systemd service name |
+| `COMFYUI_SSH_USE_SUDO` | `false` | Run systemctl with sudo |
+| `COMFYUI_SYSTEMCTL_PATH` | `/usr/bin/systemctl` | Absolute systemctl path |
+| `LOG_FILE` | `logs/llm-agent.log` | Log file path |
+| `LOG_LEVEL` | `INFO` | Log verbosity |
 
 ## 📝 Endpoints Overview
 
@@ -115,6 +162,9 @@ requests.post(
 | POST | `/v1/lease/{id}/release` | ✓ | Remove lease |
 | GET | `/v1/health` | ✓ | Health check |
 | * | `/v1/proxy/{path}` | ✓ | Proxy request |
+| POST | `/v1/images/generations` | ✗ | Image generation |
+| POST | `/v1/images/edits` | ✗ | Image edits |
+| POST | `/v1/images/variations` | ✗ | Image variations |
 
 ## 🧪 Testing
 

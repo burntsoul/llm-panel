@@ -4,6 +4,9 @@ import requests
 import json
 import asyncio
 import httpx
+import time
+import base64
+import logging
 
 from config import settings
 from lo100 import get_lo100_health_and_temp
@@ -27,6 +30,16 @@ from models import (
     cache_embeddings,
 )
 from lease_api import router as lease_api_router
+from comfyui_service import (
+    generate_images as comfyui_generate_images,
+    generate_image_edits as comfyui_generate_image_edits,
+    comfyui_idle_shutdown_loop,
+    ensure_comfyui_ready,
+    comfyui_up,
+    get_comfyui_last_activity,
+    get_comfyui_last_error,
+)
+from logging_setup import configure_logging
 
 app = FastAPI()
 
@@ -36,10 +49,13 @@ app.include_router(lease_api_router)
 
 @app.on_event("startup")
 async def _startup():
+    configure_logging(settings.LOG_FILE, settings.LOG_LEVEL)
     # Käynnistä idle-shutdown -looppi taustalle
     asyncio.create_task(idle_shutdown_loop())
     # Käynnistä CPU-aktiviteetin polleri
     asyncio.create_task(cpu_activity_poller())
+    # Käynnistä ComfyUI idle-shutdown looppi
+    asyncio.create_task(comfyui_idle_shutdown_loop())
 
 @app.get("/", response_class=HTMLResponse)
 def index():
@@ -67,64 +83,129 @@ def index():
     <html>
     <head>
       <title>LLM-ohjauspaneeli</title>
+      <link rel="preconnect" href="https://fonts.googleapis.com">
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+      <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
       <style>
+        :root {{
+          --bg-1: #f6f1e9;
+          --bg-2: #efe8dd;
+          --ink: #1a1a1a;
+          --muted: #6b5e54;
+          --card: #fffaf2;
+          --border: #e5dccf;
+          --accent: #d77a3b;
+          --accent-2: #2f5d50;
+          --ok: #1f8a5b;
+          --bad: #c43c2b;
+          --shadow: 0 12px 30px rgba(33, 22, 11, 0.12);
+          --mono: "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
+          --display: "Space Grotesk", "Segoe UI", sans-serif;
+        }}
+        * {{
+          box-sizing: border-box;
+        }}
         body {{
-          font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-          max-width: 900px;
+          font-family: var(--display);
+          color: var(--ink);
+          margin: 0;
+          background: radial-gradient(circle at top left, #f9efe2 0%, transparent 55%),
+            radial-gradient(circle at 80% 20%, #f4d9c4 0%, transparent 55%),
+            linear-gradient(135deg, var(--bg-1), var(--bg-2));
+        }}
+        .page {{
+          max-width: 1100px;
           margin: 0 auto;
-          padding: 1.5rem;
-          background: #f4f4f5;
+          padding: 2rem 1.5rem 3rem;
         }}
         h1, h2 {{
           margin-top: 0;
+          font-weight: 700;
+          letter-spacing: -0.02em;
         }}
-        .card {{
-          background: #ffffff;
-          border-radius: 12px;
-          padding: 1rem 1.25rem;
-          margin-bottom: 1rem;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.06);
+        h1 {{
+          font-size: 2rem;
+        }}
+        .panel {{
+          background: var(--card);
+          border: 1px solid var(--border);
+          border-radius: 18px;
+          padding: 1.4rem 1.6rem;
+          box-shadow: var(--shadow);
+        }}
+        .panel + .panel {{
+          margin-top: 1.2rem;
+        }}
+        .grid {{
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+          gap: 1.2rem;
+          margin-bottom: 1.2rem;
+        }}
+        .label {{
+          font-size: 0.85rem;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          color: var(--muted);
+          font-weight: 600;
+        }}
+        .status-chip {{
+          display: inline-flex;
+          align-items: center;
+          gap: 0.35rem;
+          padding: 0.2rem 0.6rem;
+          border-radius: 999px;
+          font-size: 0.85rem;
+          font-weight: 600;
+          border: 1px solid transparent;
         }}
         .status-ok {{
-          color: #16a34a;
-          font-weight: 600;
+          color: var(--ok);
+          border-color: rgba(31, 138, 91, 0.25);
+          background: rgba(31, 138, 91, 0.08);
         }}
         .status-bad {{
-          color: #dc2626;
-          font-weight: 600;
+          color: var(--bad);
+          border-color: rgba(196, 60, 43, 0.25);
+          background: rgba(196, 60, 43, 0.08);
+        }}
+        .muted {{
+          color: var(--muted);
         }}
         .power-buttons button {{
           margin-right: 0.5rem;
+          margin-bottom: 0.4rem;
         }}
         #chat-container {{
-          max-height: 60vh;
+          max-height: 55vh;
           overflow-y: auto;
-          border-radius: 8px;
-          padding: 0.75rem;
-          background: #f9fafb;
-          border: 1px solid #e5e7eb;
+          border-radius: 14px;
+          padding: 0.85rem;
+          background: #fff7ed;
+          border: 1px solid #eadfce;
           margin-bottom: 0.75rem;
           display: flex;
           flex-direction: column;
+          gap: 0.4rem;
         }}
         .msg {{
-          padding: 0.5rem 0.75rem;
-          border-radius: 8px;
-          margin-bottom: 0.35rem;
+          padding: 0.6rem 0.85rem;
+          border-radius: 12px;
           white-space: pre-wrap;
-          max-width: 80%;
+          max-width: 85%;
+          line-height: 1.4;
         }}
         .msg-user {{
-          background: #dbeafe;
+          background: #f6d7b0;
           align-self: flex-end;
         }}
         .msg-assistant {{
-          background: #e5e7eb;
+          background: #ede6db;
           align-self: flex-start;
         }}
         .msg-system {{
           font-size: 0.85rem;
-          color: #6b7280;
+          color: var(--muted);
           align-self: center;
         }}
         #input-row {{
@@ -134,38 +215,75 @@ def index():
         }}
         #prompt {{
           width: 100%;
-          min-height: 80px;
+          min-height: 90px;
           resize: vertical;
-          font-family: inherit;
+          font-family: var(--display);
+          padding: 0.6rem;
+          border-radius: 12px;
+          border: 1px solid var(--border);
+          background: #fffdf8;
         }}
         #status-line {{
           font-size: 0.85rem;
-          color: #6b7280;
+          color: var(--muted);
           min-height: 1.2em;
         }}
         #model-select {{
           margin-bottom: 0.25rem;
         }}
         button {{
-          padding: 0.4rem 0.8rem;
-          border-radius: 6px;
-          border: 1px solid #d4d4d8;
-          background: #e5e7eb;
+          padding: 0.45rem 0.9rem;
+          border-radius: 10px;
+          border: 1px solid #d2c4b3;
+          background: #f3e8db;
           cursor: pointer;
+          font-family: var(--display);
+          font-weight: 600;
+          color: #2a1c12;
         }}
         button.primary {{
-          background: #2563eb;
-          color: white;
-          border-color: #1d4ed8;
+          background: var(--accent);
+          color: #fff6ec;
+          border-color: #c0682d;
+        }}
+        button.secondary {{
+          background: #d5e6de;
+          border-color: #b0cfc2;
         }}
         button:disabled {{
           opacity: 0.6;
           cursor: default;
         }}
+        .log-box {{
+          font-family: var(--mono);
+          background: #201f1d;
+          color: #f4f0ea;
+          padding: 0.8rem;
+          border-radius: 12px;
+          height: 240px;
+          overflow-y: auto;
+          white-space: pre-wrap;
+          border: 1px solid #3b3025;
+        }}
+        .log-controls {{
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.6rem;
+          align-items: center;
+          margin-bottom: 0.8rem;
+        }}
+        .log-controls select,
+        .log-controls input {{
+          padding: 0.35rem 0.6rem;
+          border-radius: 8px;
+          border: 1px solid var(--border);
+          background: #fffdf8;
+          font-family: var(--mono);
+        }}
         .modal-overlay {{
           position: fixed;
           inset: 0;
-          background: rgba(15,23,42,0.45);
+          background: rgba(15, 23, 42, 0.45);
           display: none;
           align-items: center;
           justify-content: center;
@@ -179,7 +297,7 @@ def index():
           width: 100%;
           max-height: 80vh;
           overflow-y: auto;
-          box-shadow: 0 10px 25px rgba(0,0,0,0.25);
+          box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
         }}
         .modal-header {{
           display: flex;
@@ -198,14 +316,22 @@ def index():
           background: none;
           padding: 0;
           margin: 0;
-          color: #2563eb;
+          color: var(--accent-2);
           cursor: pointer;
           font: inherit;
+          font-weight: 600;
         }}
         .link-button:hover {{
           text-decoration: underline;
         }}
-
+        @media (max-width: 720px) {{
+          .page {{
+            padding: 1.5rem 1rem 2rem;
+          }}
+          h1 {{
+            font-size: 1.6rem;
+          }}
+        }}
       </style>
 
       <!-- Markdown-renderöinti -->
@@ -223,68 +349,116 @@ def index():
 
     </head>
     <body>
-      <div class="card">
-        <h1>LLM-palvelin</h1>
-        <p>
-          <button class="link-button" type="button" onclick="openModelsModal()">
-            Näytä mallilista ja tila
-          </button>
-        </p>
-        <p>LLM-VM tila: <b id="llm-vm-status">{llm_vm}</b></p>
-        <p>Windows-VM tila: <b id="win-vm-status">{win_vm}</b></p>
-        <p>Huoltotila: <b id="maintenance-status">{'ON' if maintenance else 'OFF'}</b></p>
-        <p>LLM API:
-          <span id="llm-api-status" class="{ 'status-ok' if up else 'status-bad' }">
-            {'UP' if up else 'DOWN'}
-          </span>
-        </p>
-        <p>System health:
-          <span id="system-health" class="status-bad">
-            tuntematon
-          </span>
-        </p>
-        <p>CPU0 lämpötila:
-          <span id="cpu-temp">-</span>
-        </p>
+      <div class="page">
+        <div class="grid">
+          <div class="panel">
+            <div class="label">LLM Control</div>
+            <h1>LLM-palvelin</h1>
+            <p>
+              <button class="link-button" type="button" onclick="openModelsModal()">
+                Näytä mallilista ja tila
+              </button>
+            </p>
+            <p>
+              <a class="link-button" href="/tools/image-edit" target="_blank">
+                Avaa Image Edit -työkalu
+              </a>
+            </p>
+            <p>LLM-VM tila: <b id="llm-vm-status">{llm_vm}</b></p>
+            <p>Windows-VM tila: <b id="win-vm-status">{win_vm}</b></p>
+            <p>Huoltotila: <b id="maintenance-status">{'ON' if maintenance else 'OFF'}</b></p>
+            <p>LLM API:
+              <span id="llm-api-status" class="status-chip { 'status-ok' if up else 'status-bad' }">
+                {'UP' if up else 'DOWN'}
+              </span>
+            </p>
+            <p>System health:
+              <span id="system-health" class="status-chip status-bad">
+                tuntematon
+              </span>
+            </p>
+            <p>CPU0 lämpötila:
+              <span id="cpu-temp">-</span>
+            </p>
 
-        <div class="power-buttons">
-          <div style="margin-bottom:0.6rem;">
-            <b>LLM-VM ({settings.LLM_VM_ID})</b><br/>
-            <button type="button" onclick="sendPower('llm_on')">Start</button>
-            <button type="button" onclick="sendPower('llm_shutdown')">Shutdown</button>
-            <button type="button" onclick="sendPower('llm_stop')">Force stop</button>
+            <div class="power-buttons">
+              <div style="margin-bottom:0.6rem;">
+                <b>LLM-VM ({settings.LLM_VM_ID})</b><br/>
+                <button type="button" onclick="sendPower('llm_on')">Start</button>
+                <button type="button" onclick="sendPower('llm_shutdown')">Shutdown</button>
+                <button type="button" onclick="sendPower('llm_stop')">Force stop</button>
+              </div>
+
+              <div style="margin-bottom:0.6rem;">
+                <b>Windows-VM ({settings.WINDOWS_VM_ID})</b><br/>
+                <button type="button" onclick="sendPower('win_on')">Start</button>
+                <button type="button" onclick="sendPower('win_shutdown')">Shutdown</button>
+                <button type="button" onclick="sendPower('win_stop')">Force stop</button>
+              </div>
+
+              <div>
+                <b>Huolto</b><br/>
+                <button type="button" onclick="sendPower('maintenance_toggle')">Toggle huoltotila</button>
+              </div>
+            </div>
           </div>
 
-          <div style="margin-bottom:0.6rem;">
-            <b>Windows-VM ({settings.WINDOWS_VM_ID})</b><br/>
-            <button type="button" onclick="sendPower('win_on')">Start</button>
-            <button type="button" onclick="sendPower('win_shutdown')">Shutdown</button>
-            <button type="button" onclick="sendPower('win_stop')">Force stop</button>
-          </div>
-
-          <div>
-            <b>Huolto</b><br/>
-            <button type="button" onclick="sendPower('maintenance_toggle')">Toggle huoltotila</button>
+          <div class="panel">
+            <div class="label">Image Engine</div>
+            <h2>ComfyUI</h2>
+            <p>ComfyUI API:
+              <span id="comfyui-status" class="status-chip status-bad">DOWN</span>
+            </p>
+            <p>Viimeisin aktiviteetti:
+              <span id="comfyui-last-activity" class="muted">-</span>
+            </p>
+            <p>Viimeisin virhe:
+              <span id="comfyui-last-error" class="muted">-</span>
+            </p>
+            <div style="margin-top:0.6rem;">
+              <button type="button" class="secondary" onclick="wakeComfyUI()">Start ComfyUI</button>
+              <button type="button" onclick="fetchLogs()">Refresh logs</button>
+            </div>
+            <p class="muted" style="margin-top:0.6rem;">
+              ComfyUI käynnistetään on-demand ja sammutetaan idlen jälkeen.
+            </p>
           </div>
         </div>
 
+        <div class="panel">
+          <h2>Chat</h2>
+          <div id="chat-container"></div>
 
-      <div class="card">
-        <h2>Chat</h2>
-        <div id="chat-container"></div>
+          <div id="input-row">
+            <div id="model-select">
+              <label>Malli:</label>
+              <select id="model">
+                {html_models}
+              </select>
+            </div>
+            <textarea id="prompt" placeholder="Kirjoita viesti ja paina Lähetä..."></textarea>
+            <div>
+              <button id="send-btn" class="primary" onclick="sendMessage()">Lähetä</button>
+            </div>
+            <div id="status-line"></div>
+          </div>
+        </div>
 
-        <div id="input-row">
-          <div id="model-select">
-            <label>Malli:</label>
-            <select id="model">
-              {html_models}
+        <div class="panel">
+          <div class="label">Logs</div>
+          <h2>LLM-agent logit</h2>
+          <div class="log-controls">
+            <label for="log-lines" class="muted">Rivejä:</label>
+            <select id="log-lines">
+              <option value="100">100</option>
+              <option value="200" selected>200</option>
+              <option value="500">500</option>
+              <option value="1000">1000</option>
             </select>
+            <button type="button" onclick="fetchLogs()">Hae logit</button>
+            <span id="log-path" class="muted"></span>
           </div>
-          <textarea id="prompt" placeholder="Kirjoita viesti ja paina Lähetä..."></textarea>
-          <div>
-            <button id="send-btn" class="primary" onclick="sendMessage()">Lähetä</button>
-          </div>
-          <div id="status-line"></div>
+          <div id="log-viewer" class="log-box">Logit eivät ole vielä ladattu.</div>
         </div>
       </div>
 
@@ -308,6 +482,9 @@ def index():
         const modalOverlay = document.getElementById('modal-overlay');
         const modalTitle = document.getElementById('modal-title');
         const modalBody = document.getElementById('modal-body');
+        const logViewer = document.getElementById('log-viewer');
+        const logLines = document.getElementById('log-lines');
+        const logPath = document.getElementById('log-path');
 
         function openModal(title, bodyHtml) {{
           if (modalTitle) modalTitle.textContent = title || '';
@@ -330,6 +507,17 @@ def index():
           return div;
         }}
 
+        function formatIsoTime(value) {{
+          if (!value) return '-';
+          try {{
+            const date = new Date(value);
+            if (Number.isNaN(date.getTime())) return value;
+            return date.toLocaleString();
+          }} catch (e) {{
+            return value;
+          }}
+        }}
+
         async function refreshStatus() {{
           try {{
             const response = await fetch('/api/status');
@@ -343,6 +531,9 @@ def index():
             const llmEl = document.getElementById('llm-api-status');
             const healthEl = document.getElementById('system-health');
             const cpuTempEl = document.getElementById('cpu-temp');
+            const comfyEl = document.getElementById('comfyui-status');
+            const comfyLastEl = document.getElementById('comfyui-last-activity');
+            const comfyErrEl = document.getElementById('comfyui-last-error');
 
             if (llmVmEl && data.llm_vm) {{
               llmVmEl.textContent = data.llm_vm;
@@ -378,6 +569,21 @@ def index():
 
             if (cpuTempEl) {{
               cpuTempEl.textContent = data.cpu_temp || '-';
+            }}
+
+            if (comfyEl) {{
+              const up = !!data.comfyui_up;
+              comfyEl.textContent = up ? 'UP' : 'DOWN';
+              comfyEl.classList.remove('status-ok', 'status-bad');
+              comfyEl.classList.add(up ? 'status-ok' : 'status-bad');
+            }}
+
+            if (comfyLastEl) {{
+              comfyLastEl.textContent = formatIsoTime(data.comfyui_last_activity);
+            }}
+
+            if (comfyErrEl) {{
+              comfyErrEl.textContent = data.comfyui_last_error || '-';
             }}
           }} catch (e) {{
             console.warn('Status-päivitys epäonnistui:', e);
@@ -474,11 +680,43 @@ def index():
           }}
         }}
 
+        async function wakeComfyUI() {{
+          try {{
+            const resp = await fetch('/api/comfyui_wake', {{ method: 'POST' }});
+            const data = await resp.json();
+            if (!data.ok) {{
+              openModal('ComfyUI', `<p>ComfyUI käynnistys epäonnistui: ${{data.error || 'tuntematon virhe'}}</p>`);
+            }} else {{
+              openModal('ComfyUI', `<p>ComfyUI käynnistys OK.</p>`);
+            }}
+            refreshStatus();
+          }} catch (err) {{
+            openModal('Virhe', `<p>ComfyUI käynnistys epäonnistui: ${{err}}</p>`);
+          }}
+        }}
+
+        async function fetchLogs() {{
+          try {{
+            const lineCount = logLines ? logLines.value : 200;
+            const resp = await fetch(`/api/logs?lines=${{lineCount}}`);
+            const data = await resp.json();
+            if (!data.ok) {{
+              if (logViewer) logViewer.textContent = data.error || 'Logien luku epäonnistui.';
+              if (logPath) logPath.textContent = data.path ? `Path: ${{data.path}}` : '';
+              return;
+            }}
+            if (logViewer) logViewer.textContent = (data.lines || []).join('\\n');
+            if (logPath) logPath.textContent = data.path ? `Path: ${{data.path}}` : '';
+          }} catch (err) {{
+            if (logViewer) logViewer.textContent = `Logien luku epäonnistui: ${{err}}`;
+          }}
+        }}
 
 
         // Päivitä status heti ja sitten 10 s välein
         window.addEventListener('load', () => {{
           refreshStatus();
+          fetchLogs();
           setInterval(refreshStatus, 10000);
         }});
 
@@ -762,6 +1000,8 @@ def api_status():
 
     maintenance = get_maintenance_mode()
     health, cpu_temp = get_lo100_health_and_temp()
+    comfy_last = get_comfyui_last_activity()
+    comfy_err = get_comfyui_last_error()
 
     return {
         "llm_up": up,
@@ -770,7 +1010,33 @@ def api_status():
         "maintenance_mode": maintenance,
         "system_health": health,
         "cpu_temp": cpu_temp,
+        "comfyui_up": comfyui_up(),
+        "comfyui_last_activity": comfy_last.isoformat(),
+        "comfyui_last_error": comfy_err,
     }
+
+@app.post("/api/comfyui_wake")
+async def api_comfyui_wake():
+    ok = await ensure_comfyui_ready()
+    return {"ok": ok, "up": comfyui_up(), "error": get_comfyui_last_error()}
+
+
+@app.get("/api/logs")
+def api_logs(lines: int = 200):
+    """
+    Return tail of log file for UI.
+    """
+    lines = max(10, min(2000, int(lines)))
+    log_path = settings.LOG_FILE
+    try:
+        with open(log_path, "r", encoding="utf-8") as handle:
+            content = handle.read().splitlines()
+        tail = content[-lines:]
+        return {"ok": True, "lines": tail, "path": log_path}
+    except FileNotFoundError:
+        return {"ok": False, "lines": [], "path": log_path, "error": "log file not found"}
+    except Exception as exc:
+        return {"ok": False, "lines": [], "path": log_path, "error": str(exc)}
 
 @app.get("/api/models")
 def api_models():
@@ -1383,3 +1649,770 @@ async def create_embeddings(request: Request):
                 ).decode("utf-8")
     
     return JSONResponse(status_code=200, content=response_data)
+
+
+@app.post("/v1/images/generations")
+async def images_generations(request: Request):
+    """
+    OpenAI-yhteensopiva image generation -endpointti (ComfyUI).
+    """
+    body_bytes = await request.body()
+    try:
+        body = json.loads(body_bytes.decode("utf-8"))
+    except Exception:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": {
+                    "message": "Invalid JSON in request body",
+                    "type": "invalid_request_error",
+                }
+            },
+        )
+
+    prompt = body.get("prompt")
+    if isinstance(prompt, list):
+        prompt = "\n".join(str(p) for p in prompt if p is not None)
+    if not prompt:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": {
+                    "message": "prompt field is required",
+                    "type": "invalid_request_error",
+                }
+            },
+        )
+
+    response_format = body.get("response_format", "b64_json")
+    if response_format not in ("b64_json", "url"):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": {
+                    "message": "response_format must be 'b64_json' or 'url'",
+                    "type": "invalid_request_error",
+                }
+            },
+        )
+
+    size = body.get("size", "1024x1024")
+    try:
+        size_str = str(size)
+        if "x" not in size_str:
+            raise ValueError("size must be formatted like 1024x1024")
+        width_str, height_str = size_str.lower().split("x", 1)
+        if int(width_str) <= 0 or int(height_str) <= 0:
+            raise ValueError("size must be positive")
+    except Exception as exc:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": {
+                    "message": str(exc),
+                    "type": "invalid_request_error",
+                }
+            },
+        )
+    n = int(body.get("n", 1))
+    if n <= 0 or n > settings.COMFYUI_MAX_BATCH_SIZE:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": {
+                    "message": f"n must be between 1 and {settings.COMFYUI_MAX_BATCH_SIZE}",
+                    "type": "invalid_request_error",
+                }
+            },
+        )
+
+    negative_prompt = body.get("negative_prompt", "")
+    steps = max(1, int(body.get("steps", settings.COMFYUI_DEFAULT_STEPS)))
+    cfg_scale = max(0.0, float(body.get("cfg_scale", settings.COMFYUI_DEFAULT_CFG_SCALE)))
+    seed = int(body.get("seed", int(time.time())))
+    sampler_name = body.get("sampler", settings.COMFYUI_DEFAULT_SAMPLER)
+    scheduler = body.get("scheduler", settings.COMFYUI_DEFAULT_SCHEDULER)
+    checkpoint_name = body.get("model") or settings.COMFYUI_DEFAULT_CHECKPOINT or None
+
+    try:
+        data = await comfyui_generate_images(
+            prompt=str(prompt),
+            negative_prompt=str(negative_prompt),
+            size=size_str,
+            batch_size=n,
+            steps=steps,
+            cfg_scale=cfg_scale,
+            seed=seed,
+            sampler_name=str(sampler_name),
+            scheduler=str(scheduler),
+            checkpoint_name=checkpoint_name,
+            response_format=response_format,
+        )
+    except Exception as exc:
+        return JSONResponse(
+            status_code=502,
+            content={
+                "error": {
+                    "message": f"Image generation failed: {exc}",
+                    "type": "bad_gateway",
+                }
+            },
+        )
+
+    return JSONResponse(
+        content={
+            "created": int(time.time()),
+            "data": data,
+        }
+    )
+
+
+@app.post("/v1/images/edits")
+async def images_edits(request: Request):
+    content_type = request.headers.get("content-type", "")
+    image_bytes = None
+    mask_bytes = None
+    image_filename = "image.png"
+    mask_filename = "mask.png"
+
+    if "application/json" in content_type:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        prompt = str(body.get("prompt") or "refine the image")
+        model = str(body.get("model") or "")
+        n = int(body.get("n", 1))
+        response_format = body.get("response_format", "b64_json")
+        negative_prompt = str(body.get("negative_prompt") or "")
+        steps = int(body.get("steps", settings.COMFYUI_DEFAULT_STEPS))
+        cfg_scale = float(body.get("cfg_scale", settings.COMFYUI_DEFAULT_CFG_SCALE))
+        seed = int(body.get("seed", 0))
+        sampler = str(body.get("sampler", settings.COMFYUI_DEFAULT_SAMPLER))
+        scheduler = str(body.get("scheduler", settings.COMFYUI_DEFAULT_SCHEDULER))
+        denoise = float(body.get("denoise", settings.COMFYUI_EDIT_DENOISE))
+        image_b64 = body.get("image_b64") or body.get("image")
+        mask_b64 = body.get("mask_b64") or body.get("mask")
+
+        if not image_b64:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": {
+                        "message": "image_b64 is required for JSON edits",
+                        "type": "invalid_request_error",
+                    }
+                },
+            )
+
+        try:
+            if isinstance(image_b64, str) and "," in image_b64:
+                image_b64 = image_b64.split(",", 1)[1]
+            image_bytes = base64.b64decode(image_b64)
+        except Exception:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": {
+                        "message": "Invalid image_b64",
+                        "type": "invalid_request_error",
+                    }
+                },
+            )
+
+        if mask_b64:
+            try:
+                if isinstance(mask_b64, str) and "," in mask_b64:
+                    mask_b64 = mask_b64.split(",", 1)[1]
+                mask_bytes = base64.b64decode(mask_b64)
+            except Exception:
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "error": {
+                            "message": "Invalid mask_b64",
+                            "type": "invalid_request_error",
+                        }
+                    },
+                )
+    else:
+        form = await request.form()
+        prompt = str(form.get("prompt") or "refine the image")
+        model = str(form.get("model") or "")
+        n = int(form.get("n") or 1)
+        response_format = str(form.get("response_format") or "b64_json")
+        negative_prompt = str(form.get("negative_prompt") or "")
+        steps = int(form.get("steps") or settings.COMFYUI_DEFAULT_STEPS)
+        cfg_scale = float(form.get("cfg_scale") or settings.COMFYUI_DEFAULT_CFG_SCALE)
+        seed = int(form.get("seed") or 0)
+        sampler = str(form.get("sampler") or settings.COMFYUI_DEFAULT_SAMPLER)
+        scheduler = str(form.get("scheduler") or settings.COMFYUI_DEFAULT_SCHEDULER)
+        denoise = float(form.get("denoise") or settings.COMFYUI_EDIT_DENOISE)
+
+        image_file = form.get("image")
+        if image_file is None and "image_file" in form:
+            image_file = form.get("image_file")
+        if image_file is None and "image[]" in form:
+            files = form.getlist("image[]")
+            image_file = files[0] if files else None
+        if image_file is not None and hasattr(image_file, "read"):
+            image_bytes = await image_file.read()
+            image_filename = getattr(image_file, "filename", "image.png") or "image.png"
+
+        mask_file = form.get("mask")
+        if mask_file is None and "mask_file" in form:
+            mask_file = form.get("mask_file")
+        if mask_file is None and "mask[]" in form:
+            files = form.getlist("mask[]")
+            mask_file = files[0] if files else None
+        if mask_file is not None and hasattr(mask_file, "read"):
+            mask_bytes = await mask_file.read()
+            mask_filename = getattr(mask_file, "filename", "mask.png") or "mask.png"
+
+    if response_format not in ("b64_json", "url"):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": {
+                    "message": "response_format must be 'b64_json' or 'url'",
+                    "type": "invalid_request_error",
+                }
+            },
+        )
+
+    if not image_bytes:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": {
+                    "message": "image is required",
+                    "type": "invalid_request_error",
+                }
+            },
+        )
+
+    checkpoint_name = model or settings.COMFYUI_DEFAULT_CHECKPOINT or None
+
+    try:
+        data = await comfyui_generate_image_edits(
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            steps=max(1, int(steps)),
+            cfg_scale=max(0.0, float(cfg_scale)),
+            seed=int(seed) if int(seed) != 0 else int(time.time()),
+            sampler_name=sampler,
+            scheduler=scheduler,
+            checkpoint_name=checkpoint_name,
+            response_format=response_format,
+            image_bytes=image_bytes,
+            image_filename=image_filename,
+            denoise=max(0.05, min(0.95, float(denoise))),
+            mask_bytes=mask_bytes,
+            mask_filename=mask_filename if mask_bytes else None,
+            n=max(1, int(n)),
+        )
+    except Exception as exc:
+        return JSONResponse(
+            status_code=502,
+            content={
+                "error": {
+                    "message": f"Image edit failed: {exc}",
+                    "type": "bad_gateway",
+                }
+            },
+        )
+
+    return JSONResponse(
+        content={
+            "created": int(time.time()),
+            "data": data,
+        }
+    )
+
+
+@app.post("/v1/images/variations")
+async def images_variations(request: Request):
+    content_type = request.headers.get("content-type", "")
+    image_bytes = None
+    image_filename = "image.png"
+
+    if "application/json" in content_type:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        model = str(body.get("model") or "")
+        n = int(body.get("n", 1))
+        response_format = body.get("response_format", "b64_json")
+        steps = int(body.get("steps", settings.COMFYUI_DEFAULT_STEPS))
+        cfg_scale = float(body.get("cfg_scale", settings.COMFYUI_DEFAULT_CFG_SCALE))
+        seed = int(body.get("seed", 0))
+        sampler = str(body.get("sampler", settings.COMFYUI_DEFAULT_SAMPLER))
+        scheduler = str(body.get("scheduler", settings.COMFYUI_DEFAULT_SCHEDULER))
+        denoise = float(body.get("denoise", settings.COMFYUI_EDIT_DENOISE))
+        image_b64 = body.get("image_b64") or body.get("image")
+
+        if not image_b64:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": {
+                        "message": "image_b64 is required for JSON variations",
+                        "type": "invalid_request_error",
+                    }
+                },
+            )
+
+        try:
+            if isinstance(image_b64, str) and "," in image_b64:
+                image_b64 = image_b64.split(",", 1)[1]
+            image_bytes = base64.b64decode(image_b64)
+        except Exception:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": {
+                        "message": "Invalid image_b64",
+                        "type": "invalid_request_error",
+                    }
+                },
+            )
+    else:
+        form = await request.form()
+        model = str(form.get("model") or "")
+        n = int(form.get("n") or 1)
+        response_format = str(form.get("response_format") or "b64_json")
+        steps = int(form.get("steps") or settings.COMFYUI_DEFAULT_STEPS)
+        cfg_scale = float(form.get("cfg_scale") or settings.COMFYUI_DEFAULT_CFG_SCALE)
+        seed = int(form.get("seed") or 0)
+        sampler = str(form.get("sampler") or settings.COMFYUI_DEFAULT_SAMPLER)
+        scheduler = str(form.get("scheduler") or settings.COMFYUI_DEFAULT_SCHEDULER)
+        denoise = float(form.get("denoise") or settings.COMFYUI_EDIT_DENOISE)
+
+        image_file = form.get("image")
+        if image_file is None and "image_file" in form:
+            image_file = form.get("image_file")
+        if image_file is not None and hasattr(image_file, "read"):
+            image_bytes = await image_file.read()
+            image_filename = getattr(image_file, "filename", "image.png") or "image.png"
+
+    if response_format not in ("b64_json", "url"):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": {
+                    "message": "response_format must be 'b64_json' or 'url'",
+                    "type": "invalid_request_error",
+                }
+            },
+        )
+
+    if not image_bytes:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": {
+                    "message": "image is required",
+                    "type": "invalid_request_error",
+                }
+            },
+        )
+
+    checkpoint_name = model or settings.COMFYUI_DEFAULT_CHECKPOINT or None
+
+    try:
+        data = await comfyui_generate_image_edits(
+            prompt="create a variation of the image",
+            negative_prompt="",
+            steps=max(1, int(steps)),
+            cfg_scale=max(0.0, float(cfg_scale)),
+            seed=int(seed) if int(seed) != 0 else int(time.time()),
+            sampler_name=sampler,
+            scheduler=scheduler,
+            checkpoint_name=checkpoint_name,
+            response_format=response_format,
+            image_bytes=image_bytes,
+            image_filename=image_filename,
+            denoise=max(0.05, min(0.95, float(denoise))),
+            n=max(1, int(n)),
+        )
+    except Exception as exc:
+        return JSONResponse(
+            status_code=502,
+            content={
+                "error": {
+                    "message": f"Image variation failed: {exc}",
+                    "type": "bad_gateway",
+                }
+            },
+        )
+
+    return JSONResponse(
+        content={
+            "created": int(time.time()),
+            "data": data,
+        }
+    )
+
+
+@app.get("/tools/image-edit", response_class=HTMLResponse)
+def image_edit_tool():
+    html = """
+    <html>
+    <head>
+      <title>Image Edit Tool</title>
+      <style>
+        :root {
+          --bg: #f6f1e9;
+          --card: #fffaf2;
+          --border: #e5dccf;
+          --ink: #1a1a1a;
+          --muted: #6b5e54;
+          --accent: #d77a3b;
+        }
+        * { box-sizing: border-box; }
+        body {
+          margin: 0;
+          font-family: "Space Grotesk", "Segoe UI", sans-serif;
+          background: var(--bg);
+          color: var(--ink);
+        }
+        .page {
+          max-width: 1200px;
+          margin: 0 auto;
+          padding: 2rem 1.5rem 3rem;
+        }
+        h1 { margin: 0 0 0.5rem 0; }
+        .panel {
+          background: var(--card);
+          border: 1px solid var(--border);
+          border-radius: 16px;
+          padding: 1rem 1.25rem;
+          margin-bottom: 1rem;
+        }
+        .row {
+          display: grid;
+          grid-template-columns: minmax(280px, 1fr) 2fr;
+          gap: 1rem;
+        }
+        label { font-size: 0.9rem; color: var(--muted); }
+        input[type="text"], textarea, select, input[type="number"] {
+          width: 100%;
+          padding: 0.5rem;
+          border-radius: 10px;
+          border: 1px solid var(--border);
+          background: #fffdf8;
+          font-family: inherit;
+        }
+        button {
+          padding: 0.5rem 1rem;
+          border-radius: 10px;
+          border: 1px solid #d2c4b3;
+          background: var(--accent);
+          color: #fff6ec;
+          font-weight: 600;
+          cursor: pointer;
+        }
+        .canvas-wrap {
+          position: relative;
+          display: inline-block;
+          border: 1px dashed #d2c4b3;
+          background: #fff;
+          border-radius: 12px;
+          overflow: hidden;
+        }
+        canvas {
+          display: block;
+          max-width: 100%;
+          height: auto;
+        }
+        #mask-canvas {
+          opacity: 0.35;
+          cursor: crosshair;
+        }
+        .toolbar {
+          display: flex;
+          gap: 0.6rem;
+          flex-wrap: wrap;
+          margin: 0.6rem 0;
+        }
+        .muted { color: var(--muted); font-size: 0.9rem; }
+        .preview img {
+          max-width: 100%;
+          border-radius: 12px;
+          border: 1px solid var(--border);
+        }
+        .history {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+          gap: 0.6rem;
+        }
+        .history img {
+          width: 100%;
+          border-radius: 10px;
+          border: 1px solid var(--border);
+          cursor: pointer;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="page">
+        <div class="panel">
+          <h1>Image Edit Tool</h1>
+          <p class="muted">Lataa kuva, maalaa maski (valkoinen = muokkaa), ja lähetä edit-pyyntö.</p>
+        </div>
+        <div class="row">
+          <div class="panel">
+            <label>Image</label>
+            <input type="file" id="image-input" accept="image/*" />
+            <div class="toolbar">
+              <label>Brush</label>
+              <input type="number" id="brush-size" value="24" min="4" max="120" />
+              <button type="button" id="clear-mask">Clear mask</button>
+            </div>
+            <label>Prompt</label>
+            <textarea id="prompt" rows="6">remove selected detail, preserve layout</textarea>
+            <label>Model (checkpoint filename)</label>
+            <input type="text" id="model" value="__DEFAULT_CHECKPOINT__" placeholder="sd_xl_base_1.0.safetensors" />
+            <div class="muted">Tyhjä = käyttää oletusta.</div>
+            <label>Response format</label>
+            <select id="response-format">
+              <option value="b64_json">b64_json</option>
+              <option value="url">url</option>
+            </select>
+            <label>
+              <input type="checkbox" id="invert-mask" />
+              Invert mask (toggle if edits happen outside selection)
+            </label>
+            <label>n</label>
+            <input type="number" id="n" value="1" min="1" max="4" />
+            <label>Denoise</label>
+            <input type="number" id="denoise" value="0.7" min="0.05" max="0.95" step="0.05" />
+            <label>Steps</label>
+            <input type="number" id="steps" value="35" min="10" max="60" />
+            <label>CFG scale</label>
+            <input type="number" id="cfg-scale" value="6" min="1" max="12" step="0.5" />
+            <label>Sampler</label>
+            <select id="sampler">
+              <option value="dpmpp_2m_sde">dpmpp_2m_sde</option>
+              <option value="dpmpp_2m">dpmpp_2m</option>
+              <option value="euler">euler</option>
+            </select>
+            <label>Scheduler</label>
+            <select id="scheduler">
+              <option value="normal">normal</option>
+              <option value="karras">karras</option>
+            </select>
+            <div class="toolbar">
+              <button type="button" id="send-edit">Send edit</button>
+            </div>
+            <div class="muted" id="status"></div>
+          </div>
+          <div class="panel">
+            <div class="canvas-wrap">
+              <canvas id="image-canvas"></canvas>
+              <canvas id="mask-canvas" style="position:absolute; inset:0;"></canvas>
+            </div>
+            <p class="muted">Maski: valkoinen = muokkaa, musta = säilytä.</p>
+            <div class="preview" id="preview"></div>
+            <div class="panel" style="margin-top:1rem;">
+              <div class="label">History</div>
+              <div class="history" id="history"></div>
+              <p class="muted">Klikkaa kuvaa käyttääksesi sitä uudeksi inputiksi.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <script>
+        const imageInput = document.getElementById('image-input');
+        const imageCanvas = document.getElementById('image-canvas');
+        const maskCanvas = document.getElementById('mask-canvas');
+        const brushSizeInput = document.getElementById('brush-size');
+        const clearMaskBtn = document.getElementById('clear-mask');
+        const sendBtn = document.getElementById('send-edit');
+        const statusEl = document.getElementById('status');
+        const previewEl = document.getElementById('preview');
+        const historyEl = document.getElementById('history');
+        const history = [];
+        const historyLimit = 5;
+        let currentImageDataUrl = null;
+
+        const imgCtx = imageCanvas.getContext('2d');
+        const maskCtx = maskCanvas.getContext('2d');
+        let drawing = false;
+
+        function setStatus(text) {
+          statusEl.textContent = text || '';
+        }
+
+        function resizeCanvases(width, height) {
+          imageCanvas.width = width;
+          imageCanvas.height = height;
+          maskCanvas.width = width;
+          maskCanvas.height = height;
+          maskCtx.fillStyle = 'black';
+          maskCtx.fillRect(0, 0, width, height);
+        }
+
+        function drawImageToCanvas(file) {
+          const img = new Image();
+          img.onload = () => {
+            resizeCanvases(img.width, img.height);
+            imgCtx.clearRect(0, 0, img.width, img.height);
+            imgCtx.drawImage(img, 0, 0);
+          };
+          img.src = URL.createObjectURL(file);
+        }
+
+        function drawImageFromDataUrl(dataUrl) {
+          const img = new Image();
+          img.onload = () => {
+            resizeCanvases(img.width, img.height);
+            imgCtx.clearRect(0, 0, img.width, img.height);
+            imgCtx.drawImage(img, 0, 0);
+            currentImageDataUrl = dataUrl;
+          };
+          img.src = dataUrl;
+        }
+
+        imageInput.addEventListener('change', (e) => {
+          const file = e.target.files[0];
+          if (!file) return;
+          drawImageToCanvas(file);
+        });
+
+        function drawMask(e) {
+          if (!drawing) return;
+          const rect = maskCanvas.getBoundingClientRect();
+          const scaleX = maskCanvas.width / rect.width;
+          const scaleY = maskCanvas.height / rect.height;
+          const x = (e.clientX - rect.left) * scaleX;
+          const y = (e.clientY - rect.top) * scaleY;
+          const radius = parseInt(brushSizeInput.value || '24', 10);
+          maskCtx.fillStyle = 'white';
+          maskCtx.beginPath();
+          maskCtx.arc(x, y, radius, 0, Math.PI * 2);
+          maskCtx.fill();
+        }
+
+        maskCanvas.addEventListener('mousedown', (e) => {
+          drawing = true;
+          drawMask(e);
+        });
+        maskCanvas.addEventListener('mousemove', drawMask);
+        window.addEventListener('mouseup', () => { drawing = false; });
+
+        clearMaskBtn.addEventListener('click', () => {
+          maskCtx.fillStyle = 'black';
+          maskCtx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
+        });
+
+        async function toBlob(canvas) {
+          return new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        }
+
+        function buildMaskCanvas(invert) {
+          if (!invert) return maskCanvas;
+          const temp = document.createElement('canvas');
+          temp.width = maskCanvas.width;
+          temp.height = maskCanvas.height;
+          const ctx = temp.getContext('2d');
+          ctx.drawImage(maskCanvas, 0, 0);
+          const imgData = ctx.getImageData(0, 0, temp.width, temp.height);
+          const data = imgData.data;
+          for (let i = 0; i < data.length; i += 4) {
+            data[i] = 255 - data[i];
+            data[i + 1] = 255 - data[i + 1];
+            data[i + 2] = 255 - data[i + 2];
+          }
+          ctx.putImageData(imgData, 0, 0);
+          return temp;
+        }
+
+        async function toFileFromDataUrl(dataUrl, filename) {
+          const res = await fetch(dataUrl);
+          const blob = await res.blob();
+          return new File([blob], filename, { type: blob.type || 'image/png' });
+        }
+
+        sendBtn.addEventListener('click', async () => {
+          let imageFile = imageInput.files[0];
+          if (currentImageDataUrl) {
+            imageFile = await toFileFromDataUrl(currentImageDataUrl, 'history.png');
+          }
+          if (!imageFile) {
+            setStatus('Please upload an image first.');
+            return;
+          }
+          setStatus('Uploading...');
+          const invert = document.getElementById('invert-mask').checked;
+          const maskSource = buildMaskCanvas(invert);
+          const maskBlob = await toBlob(maskSource);
+          const form = new FormData();
+          form.append('image[]', imageFile, imageFile.name || 'image.png');
+          form.append('mask[]', maskBlob, 'mask.png');
+          form.append('prompt', document.getElementById('prompt').value || '');
+          form.append('model', document.getElementById('model').value || '');
+          form.append('response_format', document.getElementById('response-format').value);
+          form.append('n', document.getElementById('n').value || '1');
+          form.append('denoise', document.getElementById('denoise').value || '0.35');
+          form.append('steps', document.getElementById('steps').value || '35');
+          form.append('cfg_scale', document.getElementById('cfg-scale').value || '6');
+          form.append('sampler', document.getElementById('sampler').value || 'dpmpp_2m_sde');
+          form.append('scheduler', document.getElementById('scheduler').value || 'normal');
+
+          const resp = await fetch('/v1/images/edits', { method: 'POST', body: form });
+          if (!resp.ok) {
+            const text = await resp.text();
+            setStatus('Error: ' + text);
+            return;
+          }
+          const data = await resp.json();
+          const entries = data.data || [];
+          previewEl.innerHTML = '';
+          const newImages = [];
+          for (const entry of entries) {
+            if (entry.url) {
+              const img = document.createElement('img');
+              img.src = entry.url;
+              previewEl.appendChild(img);
+              newImages.push(entry.url);
+            } else if (entry.b64_json) {
+              const img = document.createElement('img');
+              img.src = 'data:image/png;base64,' + entry.b64_json;
+              previewEl.appendChild(img);
+              newImages.push(img.src);
+            }
+          }
+          if (newImages.length > 0) {
+            currentImageDataUrl = newImages[0];
+            for (const src of newImages) {
+              history.unshift(src);
+            }
+            while (history.length > historyLimit) history.pop();
+            renderHistory();
+          }
+          setStatus('Done.');
+        });
+
+        function renderHistory() {
+          if (!historyEl) return;
+          historyEl.innerHTML = '';
+          for (const src of history) {
+            const img = document.createElement('img');
+            img.src = src;
+            img.addEventListener('click', () => {
+              drawImageFromDataUrl(src);
+              if (imageInput) imageInput.value = '';
+            });
+            historyEl.appendChild(img);
+          }
+        }
+      </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(
+        html.replace("__DEFAULT_CHECKPOINT__", settings.COMFYUI_DEFAULT_CHECKPOINT or "")
+    )
+
