@@ -41,6 +41,8 @@ from comfyui_service import (
 )
 from logging_setup import configure_logging
 
+logger = logging.getLogger("llm-agent")
+
 app = FastAPI()
 
 # Include lease + proxy API
@@ -1215,6 +1217,14 @@ async def chat_completions(request: Request):
     messages = body.get("messages") or []
     system_prompt = body.get("system_prompt")
 
+    logger.info(
+        "chat_completions request model=%s stream=%s messages=%s max_tokens=%s",
+        body.get("model"),
+        stream,
+        len(messages) if isinstance(messages, list) else "n/a",
+        body.get("max_tokens"),
+    )
+
     # Jos system_prompt on annettu eikä messages sisällä system-roolia,
     # lisätään se messages-listan alkuun
     if system_prompt:
@@ -1437,6 +1447,15 @@ async def completions(request: Request):
         prompt = "\n".join(str(p) for p in prompt)
     elif prompt is None:
         prompt = ""
+
+    logger.info(
+        "completions request model=%s stream=%s prompt_len=%s suffix_len=%s max_tokens=%s",
+        body.get("model"),
+        stream,
+        len(prompt) if isinstance(prompt, str) else "n/a",
+        len(body.get("suffix") or "") if isinstance(body.get("suffix"), str) else "n/a",
+        max_tokens,
+    )
 
     messages = [{"role": "user", "content": str(prompt)}]
     system_prompt = body.get("system_prompt")
