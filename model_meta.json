@@ -1,11 +1,11 @@
 {
   "qwen3-vl:32b ": {
     "source": "local",
-    "device": "cpu"
+    "device": "gpu"
   },
   "qwen3-vl:8b": {
     "source": "local",
-    "device": "cpu"
+    "device": "gpu"
   },
   "qwen3-vl:235b-cloud": {
     "source": "cloud",
@@ -15,32 +15,36 @@
     "source": "local",
     "device": "gpu"
   },
+  "qwen2.5-coder:3b": {
+    "source": "local",
+    "device": "gpu"
+  },
   "deepseek-coder-v2:16b": {
     "source": "local",
     "device": "gpu"
   },
   "deepseek-r1:8b": {
     "source": "local",
-    "device": "cpu"
+    "device": "gpu"
   },
   "deepseek-r1:32b": {
     "source": "local",
-    "device": "cpu"
+    "device": "gpu"
   },
   "deepseek-coder:6.7b": {
     "source": "local",
-    "device": "cpu"
+    "device": "gpu"
   },
   "deepseek-coder:1.3b": {
     "source": "local",
-    "device": "cpu"
+    "device": "gpu"
   },
   "llama3.2:latest": {
     "source": "local",
-    "device": "cpu"
+    "device": "gpu"
   },
   "nomic-embed-text:latest": {
     "source": "local",
-    "device": "cpu"
+    "device": "gpu"
   }
 }
