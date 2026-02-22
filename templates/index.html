@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LLM-agent</title>
+    <link rel="stylesheet" href="/static/css/app.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <div class="top-chrome">
+        <header class="app-header">
+          <div class="header-left">
+            <strong class="app-title">LLM-agent</strong>
+            <span class="header-badge">New UI skeleton (Phase 1)</span>
+          </div>
+          <div class="header-right">
+            <span class="header-placeholder">Header placeholder</span>
+            <a class="legacy-link" href="/legacy">Open legacy UI</a>
+          </div>
+        </header>
+
+        <nav class="main-tabs" aria-label="Main tabs">
+          <button class="main-tab" data-tab="llm" type="button">LLM CONTROL</button>
+          <button class="main-tab" data-tab="image" type="button">IMAGE ENGINE</button>
+          <button class="main-tab" data-tab="links" type="button">LINKS</button>
+          <button class="main-tab" data-tab="chat" type="button">CHAT</button>
+          <button class="main-tab" data-tab="logs" type="button">LOGS</button>
+        </nav>
+
+        <div class="status-bar" aria-label="Status placeholders">
+          <span class="status-item">LLM VM: <strong>--</strong></span>
+          <span class="status-item">API: <strong>--</strong></span>
+          <span class="status-item">GPU: <strong>--</strong></span>
+          <span class="status-item">Watchdog: <strong>--</strong></span>
+        </div>
+      </div>
+
+      <main class="content-area">
+        <section class="tab-panel" data-panel="llm" aria-label="LLM CONTROL panel">
+          <div class="subtabs" aria-label="LLM submenu">
+            <button class="subtab active" type="button">Main</button>
+            <button class="subtab" type="button">Placeholder A</button>
+            <button class="subtab" type="button">Placeholder B</button>
+          </div>
+          <div class="panel-grid">
+            <article class="panel-card">
+              <h2>LLM Control Overview</h2>
+              <p>Placeholder content for future LLM controls and health summaries.</p>
+            </article>
+            <article class="panel-card">
+              <h2>Model Operations</h2>
+              <p>Placeholder panel for model lifecycle actions and mode controls.</p>
+            </article>
+            <article class="panel-card">
+              <h2>Runtime Info</h2>
+              <p>Placeholder panel for runtime diagnostics and resource indicators.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="tab-panel" data-panel="image" aria-label="IMAGE ENGINE panel">
+          <div class="subtabs" aria-label="IMAGE submenu">
+            <button class="subtab active" type="button">Main</button>
+            <button class="subtab" type="button">Placeholder A</button>
+            <button class="subtab" type="button">Placeholder B</button>
+          </div>
+          <div class="panel-grid">
+            <article class="panel-card">
+              <h2>Image Engine Overview</h2>
+              <p>Placeholder content for generation pipeline and queue visibility.</p>
+            </article>
+            <article class="panel-card">
+              <h2>Workflow Presets</h2>
+              <p>Placeholder panel for future workflow and template selection.</p>
+            </article>
+            <article class="panel-card">
+              <h2>Engine Status</h2>
+              <p>Placeholder panel for backend engine state and job metrics.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="tab-panel" data-panel="links" aria-label="LINKS panel">
+          <div class="subtabs" aria-label="LINKS submenu">
+            <button class="subtab active" type="button">Main</button>
+            <button class="subtab" type="button">Placeholder A</button>
+            <button class="subtab" type="button">Placeholder B</button>
+          </div>
+          <div class="panel-grid">
+            <article class="panel-card">
+              <h2>Links Overview</h2>
+              <p>Placeholder content for links and knowledge references.</p>
+            </article>
+            <article class="panel-card">
+              <h2>Collections</h2>
+              <p>Placeholder panel for future grouped resource lists and shortcuts.</p>
+            </article>
+            <article class="panel-card">
+              <h2>Recent Items</h2>
+              <p>Placeholder panel for recently touched references and notes.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="tab-panel" data-panel="chat" aria-label="CHAT panel">
+          <div class="subtabs" aria-label="CHAT submenu">
+            <button class="subtab active" type="button">Main</button>
+            <button class="subtab" type="button">Placeholder A</button>
+            <button class="subtab" type="button">Placeholder B</button>
+          </div>
+          <div class="panel-grid">
+            <article class="panel-card">
+              <h2>Chat Workspace</h2>
+              <p>Placeholder content for message stream and prompt controls.</p>
+            </article>
+            <article class="panel-card">
+              <h2>Session Tools</h2>
+              <p>Placeholder panel for future chat actions and presets.</p>
+            </article>
+            <article class="panel-card">
+              <h2>Context Controls</h2>
+              <p>Placeholder panel for context and model interaction settings.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="tab-panel" data-panel="logs" aria-label="LOGS panel">
+          <div class="subtabs" aria-label="LOGS submenu">
+            <button class="subtab active" type="button">Main</button>
+            <button class="subtab" type="button">Placeholder A</button>
+            <button class="subtab" type="button">Placeholder B</button>
+          </div>
+          <div class="panel-grid">
+            <article class="panel-card">
+              <h2>Logs Overview</h2>
+              <p>Placeholder content for log stream and diagnostics panels.</p>
+            </article>
+            <article class="panel-card">
+              <h2>Filters</h2>
+              <p>Placeholder panel for future log filtering and query controls.</p>
+            </article>
+            <article class="panel-card">
+              <h2>Alerts</h2>
+              <p>Placeholder panel for warnings, errors, and event summaries.</p>
+            </article>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+  </body>
+</html>

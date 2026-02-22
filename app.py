@@ -1,5 +1,7 @@
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 import requests
 import json
 import asyncio
@@ -47,6 +49,8 @@ from logging_setup import configure_logging
 logger = logging.getLogger("llm-agent")
 
 app = FastAPI()
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
 
 # Include lease + proxy API
 app.include_router(lease_api_router)
@@ -72,7 +76,12 @@ async def _shutdown():
         await watchdog.stop()
 
 @app.get("/", response_class=HTMLResponse)
-def index():
+def index(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
+
+
+@app.get("/legacy", response_class=HTMLResponse)
+def legacy_index():
     up = llm_server_up()
     # Proxmox VM statukset
     try:
@@ -840,7 +849,7 @@ def power(action: str = Form(...)):
     # Ohjaus tapahtuu /power_json:in kautta, mutta pidetään tämäkin.
     res = power_json(action)
     msg = res.get("message", "")
-    return f"<html><body><p>{msg}</p><p><a href='/'>Takaisin</a></p></body></html>"
+    return f"<html><body><p>{msg}</p><p><a href='/legacy'>Takaisin</a></p></body></html>"
 
 @app.post("/power_json")
 def power_json(action: str = Form(...)):
