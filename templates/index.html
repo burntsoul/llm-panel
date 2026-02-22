@@ -110,6 +110,36 @@
                 </div>
               </div>
             </article>
+
+            <article class="panel-card">
+              <div class="label">GPU THERMAL</div>
+              <h2>GPU Thermal / Watchdog</h2>
+
+              <div class="watchdog-controls">
+                <button type="button" id="watchdog-enable-btn" class="secondary">Enable</button>
+                <button type="button" id="watchdog-disable-btn">Disable</button>
+                <button type="button" id="watchdog-reset-btn">Reset error</button>
+              </div>
+              <p id="watchdog-action-status" class="watchdog-action-status muted">No action yet.</p>
+
+              <div class="watchdog-grid">
+                <div class="watchdog-row"><span>Watchdog enabled</span><strong id="wd-enabled">--</strong></div>
+                <div class="watchdog-row"><span>Watchdog mode</span><strong id="wd-mode">--</strong></div>
+                <div class="watchdog-row"><span>Telemetry status</span><strong id="wd-telemetry-ok">--</strong></div>
+                <div class="watchdog-row"><span>GPU name / id</span><strong id="wd-gpu-name-id">--</strong></div>
+                <div class="watchdog-row"><span>GPU temperature</span><strong id="wd-gpu-temp">--</strong></div>
+                <div class="watchdog-row"><span>GPU utilization</span><strong id="wd-gpu-util">--</strong></div>
+                <div class="watchdog-row"><span>GPU memory util</span><strong id="wd-gpu-mem-util">--</strong></div>
+                <div class="watchdog-row"><span>Last target fan min xx</span><strong id="wd-last-target">--</strong></div>
+                <div class="watchdog-row"><span>Last applied fan min xx</span><strong id="wd-last-applied">--</strong></div>
+                <div class="watchdog-row"><span>Last command status</span><strong id="wd-last-command-ok">--</strong></div>
+                <div class="watchdog-row"><span>Last command timestamp</span><strong id="wd-last-command-at">--</strong></div>
+                <div class="watchdog-row"><span>Last update timestamp</span><strong id="wd-updated-at">--</strong></div>
+                <div class="watchdog-row"><span>Last error</span><strong id="wd-last-error">--</strong></div>
+              </div>
+
+              <p class="watchdog-settings muted" id="wd-settings-summary">Poll/hysteresis/failsafe: --</p>
+            </article>
           </div>
         </section>
 

@@ -19,8 +19,8 @@ MODE_AUTO = "auto"
 MODE_FAILSAFE = "failsafe"
 
 DEFAULT_POLICY = (
-    {"name": "lt60", "min_temp": None, "max_temp": 59.999, "xx": 80},
-    {"name": "60-67", "min_temp": 60.0, "max_temp": 67.999, "xx": 110},
+    {"name": "lt60", "min_temp": None, "max_temp": 59.999, "xx": 20},
+    {"name": "60-67", "min_temp": 60.0, "max_temp": 67.999, "xx": 100},
     {"name": "68-73", "min_temp": 68.0, "max_temp": 73.999, "xx": 150},
     {"name": "74-79", "min_temp": 74.0, "max_temp": 79.999, "xx": 190},
     {"name": "ge80", "min_temp": 80.0, "max_temp": None, "xx": 230},

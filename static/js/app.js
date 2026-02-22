@@ -7,6 +7,7 @@ const VALID_TABS = ["llm", "image", "links", "chat", "logs"];
 let activeTab = "llm";
 let statusTimer = null;
 let logsTimer = null;
+let llmTimer = null;
 
 function normalizeHash(hashValue) {
   const value = (hashValue || "").replace(/^#/, "").toLowerCase();
@@ -95,6 +96,14 @@ function setStatusChip(id, isOk, okText = "UP", badText = "DOWN") {
   node.classList.add(isOk ? "status-ok" : "status-bad");
 }
 
+function formatMaybeNumber(value, suffix = "", digits = 0) {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return "--";
+  }
+  const num = digits > 0 ? value.toFixed(digits) : Math.round(value).toString();
+  return `${num}${suffix}`;
+}
+
 // LLM CONTROL tab logic
 function initPowerButtons() {
   qsa("[data-power-action]").forEach((btn) => {
@@ -104,6 +113,162 @@ function initPowerButtons() {
   const openModelsBtn = qs("#open-models-btn");
   if (openModelsBtn) {
     openModelsBtn.addEventListener("click", openModelsModal);
+  }
+}
+
+// GPU watchdog panel
+let watchdogEls = {
+  enableBtn: null,
+  disableBtn: null,
+  resetBtn: null,
+  actionStatus: null,
+};
+
+function initWatchdogPanel() {
+  watchdogEls = {
+    enableBtn: qs("#watchdog-enable-btn"),
+    disableBtn: qs("#watchdog-disable-btn"),
+    resetBtn: qs("#watchdog-reset-btn"),
+    actionStatus: qs("#watchdog-action-status"),
+  };
+
+  if (watchdogEls.enableBtn) {
+    watchdogEls.enableBtn.addEventListener("click", () => sendWatchdogControl({ enabled: true }, "Watchdog enabled."));
+  }
+  if (watchdogEls.disableBtn) {
+    watchdogEls.disableBtn.addEventListener("click", () => sendWatchdogControl({ enabled: false }, "Watchdog disabled."));
+  }
+  if (watchdogEls.resetBtn) {
+    watchdogEls.resetBtn.addEventListener("click", () => sendWatchdogControl({ reset_error: true }, "Watchdog error reset."));
+  }
+}
+
+function setWatchdogButtonsDisabled(disabled) {
+  if (watchdogEls.enableBtn) watchdogEls.enableBtn.disabled = disabled;
+  if (watchdogEls.disableBtn) watchdogEls.disableBtn.disabled = disabled;
+  if (watchdogEls.resetBtn) watchdogEls.resetBtn.disabled = disabled;
+}
+
+function setWatchdogButtonStateFromStatus(wd) {
+  if (!wd || typeof wd.enabled !== "boolean") {
+    return;
+  }
+  if (watchdogEls.enableBtn) watchdogEls.enableBtn.disabled = wd.enabled;
+  if (watchdogEls.disableBtn) watchdogEls.disableBtn.disabled = !wd.enabled;
+  if (watchdogEls.resetBtn) watchdogEls.resetBtn.disabled = false;
+}
+
+function setWatchdogActionStatus(message, isError = false) {
+  if (!watchdogEls.actionStatus) {
+    return;
+  }
+  watchdogEls.actionStatus.textContent = message;
+  watchdogEls.actionStatus.classList.toggle("status-error", !!isError);
+  watchdogEls.actionStatus.classList.toggle("status-ok-text", !isError);
+}
+
+function updateWatchdogPanelFromData(wd, gpuFallback) {
+  const enabledText = wd && typeof wd.enabled === "boolean" ? (wd.enabled ? "YES" : "NO") : "--";
+  const mode = wd && wd.mode ? String(wd.mode).toUpperCase() : "--";
+  const telemetryOk =
+    wd && typeof wd.telemetry_ok === "boolean"
+      ? wd.telemetry_ok
+        ? "OK"
+        : "ERROR"
+      : gpuFallback && typeof gpuFallback.telemetry_ok === "boolean"
+        ? gpuFallback.telemetry_ok
+          ? "OK"
+          : "ERROR"
+        : "--";
+
+  const gpuName = wd && wd.gpu_name ? wd.gpu_name : gpuFallback && gpuFallback.gpu_name ? gpuFallback.gpu_name : "--";
+  const gpuId = wd && wd.gpu_id ? wd.gpu_id : gpuFallback && gpuFallback.gpu_id ? gpuFallback.gpu_id : "--";
+  const gpuTemp = wd && typeof wd.gpu_temp_c === "number" ? wd.gpu_temp_c : gpuFallback && typeof gpuFallback.gpu_temp_c === "number" ? gpuFallback.gpu_temp_c : null;
+  const gpuUtil = wd && typeof wd.gpu_util_percent === "number" ? wd.gpu_util_percent : gpuFallback && typeof gpuFallback.gpu_util_percent === "number" ? gpuFallback.gpu_util_percent : null;
+  const gpuMem = wd && typeof wd.gpu_mem_util_percent === "number" ? wd.gpu_mem_util_percent : gpuFallback && typeof gpuFallback.gpu_mem_util_percent === "number" ? gpuFallback.gpu_mem_util_percent : null;
+
+  setText("wd-enabled", enabledText);
+  setText("wd-mode", mode);
+  setText("wd-telemetry-ok", telemetryOk);
+  setText("wd-gpu-name-id", `${gpuName} / ${gpuId}`);
+  setText("wd-gpu-temp", formatMaybeNumber(gpuTemp, " \u00b0C"));
+  setText("wd-gpu-util", formatMaybeNumber(gpuUtil, "%"));
+  setText("wd-gpu-mem-util", formatMaybeNumber(gpuMem, "%"));
+  setText("wd-last-target", wd && wd.last_target_xx !== null && wd.last_target_xx !== undefined ? String(wd.last_target_xx) : "--");
+  setText("wd-last-applied", wd && wd.last_applied_xx !== null && wd.last_applied_xx !== undefined ? String(wd.last_applied_xx) : "--");
+  setText(
+    "wd-last-command-ok",
+    wd && typeof wd.last_command_ok === "boolean" ? (wd.last_command_ok ? "OK" : "FAIL") : "--",
+  );
+  setText("wd-last-command-at", formatIsoTime(wd && wd.last_command_at));
+  setText("wd-updated-at", formatIsoTime((wd && wd.updated_at) || (gpuFallback && gpuFallback.updated_at)));
+  setText("wd-last-error", wd && wd.last_error ? String(wd.last_error) : gpuFallback && gpuFallback.error ? String(gpuFallback.error) : "--");
+
+  const poll = wd && wd.poll_seconds !== undefined ? `${wd.poll_seconds}s` : "--";
+  const hysteresis = wd && wd.hysteresis_c !== undefined ? `${wd.hysteresis_c}\u00b0C` : "--";
+  const failsafe = wd && wd.failsafe_fan_min_xx !== undefined ? String(wd.failsafe_fan_min_xx) : "--";
+  const minChange = wd && wd.min_change_interval_seconds !== undefined ? `${wd.min_change_interval_seconds}s` : "--";
+  const thresholds = wd && wd.thresholds ? wd.thresholds : "--";
+  setText(
+    "wd-settings-summary",
+    `Poll/hysteresis/failsafe/min-change: ${poll} / ${hysteresis} / ${failsafe} / ${minChange} | thresholds: ${thresholds}`,
+  );
+}
+
+async function refreshWatchdogPanel() {
+  const [wdResult, gpuResult] = await Promise.allSettled([
+    getJson("/api/gpu_watchdog/status"),
+    getJson("/api/gpu_telemetry"),
+  ]);
+
+  const wd = wdResult.status === "fulfilled" ? wdResult.value : null;
+  const gpu = gpuResult.status === "fulfilled" ? gpuResult.value : null;
+
+  if (!wd && !gpu) {
+    updateWatchdogPanelFromData(null, null);
+    setWatchdogActionStatus("Watchdog and telemetry data unavailable.", true);
+    setWatchdogButtonsDisabled(true);
+    return;
+  }
+
+  updateWatchdogPanelFromData(wd, gpu);
+
+  if (!wd) {
+    setWatchdogActionStatus("Watchdog status unavailable. Showing telemetry fallback.", true);
+    setWatchdogButtonsDisabled(true);
+    return;
+  }
+
+  setWatchdogButtonsDisabled(false);
+  setWatchdogButtonStateFromStatus(wd);
+}
+
+async function sendWatchdogControl(payload, successMessage) {
+  setWatchdogButtonsDisabled(true);
+  setWatchdogActionStatus("Sending watchdog command...");
+
+  try {
+    const resp = await getJson("/api/gpu_watchdog/control", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!resp.ok) {
+      setWatchdogActionStatus(`Command failed: ${resp.error || "unknown error"}`, true);
+    } else {
+      setWatchdogActionStatus(successMessage, false);
+    }
+  } catch (err) {
+    setWatchdogActionStatus(`Command failed: ${err}`, true);
+  }
+
+  try {
+    await refreshWatchdogPanel();
+  } catch (_) {
+    // Keep action feedback even if refresh fails.
   }
 }
 
@@ -394,7 +559,7 @@ async function fetchLogs() {
   }
 }
 
-// Shared status updates
+// Shared status bar updates
 async function refreshStatus() {
   try {
     const data = await getJson("/api/status");
@@ -422,12 +587,26 @@ async function refreshStatus() {
 
     setText("top-llm-vm", data.llm_vm || "--");
     setText("top-llm-api", data.llm_up ? "UP" : "DOWN");
-    setText("top-watchdog", "--");
+    let watchdogMode = "--";
+    if (typeof data.gpu_watchdog_mode === "string") {
+      const normalized = data.gpu_watchdog_mode.toLowerCase();
+      if (normalized === "disabled") watchdogMode = "OFF";
+      else if (normalized === "auto") watchdogMode = "AUTO";
+      else if (normalized === "failsafe") watchdogMode = "FAILSAFE";
+      else watchdogMode = normalized.toUpperCase();
+    }
+    setText("top-watchdog", watchdogMode);
 
     try {
       const gpu = await getJson("/api/gpu_telemetry");
-      const util = gpu && typeof gpu.gpu_util_percent === "number" ? `${Math.round(gpu.gpu_util_percent)}%` : "--";
-      setText("top-gpu", util);
+      const temp = gpu && typeof gpu.gpu_temp_c === "number" ? `${Math.round(gpu.gpu_temp_c)}\u00b0C` : "--";
+      setText("top-gpu", temp);
+      const topGpu = qs("#top-gpu");
+      if (topGpu) {
+        const util = gpu && typeof gpu.gpu_util_percent === "number" ? `${Math.round(gpu.gpu_util_percent)}%` : "--";
+        const mem = gpu && typeof gpu.gpu_mem_util_percent === "number" ? `${Math.round(gpu.gpu_mem_util_percent)}%` : "--";
+        topGpu.title = `GPU temp/util/mem: ${temp} / ${util} / ${mem}`;
+      }
     } catch (_) {
       setText("top-gpu", "--");
     }
@@ -451,6 +630,7 @@ function initSubtabs() {
   });
 }
 
+// Polling scheduler / intervals
 function syncTabPolling() {
   if (activeTab === "logs") {
     if (!logsTimer) {
@@ -464,6 +644,20 @@ function syncTabPolling() {
   } else if (logsTimer) {
     window.clearInterval(logsTimer);
     logsTimer = null;
+  }
+
+  if (activeTab === "llm") {
+    if (!llmTimer) {
+      refreshWatchdogPanel();
+      llmTimer = window.setInterval(() => {
+        if (activeTab === "llm") {
+          refreshWatchdogPanel();
+        }
+      }, 4000);
+    }
+  } else if (llmTimer) {
+    window.clearInterval(llmTimer);
+    llmTimer = null;
   }
 }
 
@@ -517,6 +711,7 @@ function initApp() {
   initSubtabs();
   initModal();
   initPowerButtons();
+  initWatchdogPanel();
   initImageControls();
   initChat();
   initLogs();
@@ -525,7 +720,7 @@ function initApp() {
   window.addEventListener("hashchange", handleHashChange);
 
   refreshStatus();
-  statusTimer = window.setInterval(refreshStatus, 10000);
+  statusTimer = window.setInterval(refreshStatus, 5000);
   syncTabPolling();
 }
 

@@ -8470,3 +8470,376 @@ teemu@192.168.8.33: Permission denied (publickey,password).
 2026-02-22 19:27:20,708 INFO gpu_watchdog: GPU watchdog loop started
 2026-02-22 19:27:57,087 INFO gpu_watchdog: GPU watchdog loop stopped
 2026-02-22 19:27:57,733 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 19:37:13,490 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 19:37:14,230 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 19:38:22,454 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-02-22 19:39:24,853 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-02-22 19:39:27,923 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-02-22 19:39:34,902 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-02-22 19:39:36,482 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-02-22 19:39:41,200 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:39:51,121 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:40:01,199 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:40:11,198 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:40:21,202 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:40:31,318 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:40:41,255 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:40:51,135 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:41:02,143 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:41:12,092 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:41:22,158 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:41:32,202 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:41:42,145 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:41:52,143 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:42:53,059 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:43:54,197 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:44:54,313 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:45:30,019 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 19:45:30,698 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 19:45:33,057 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:45:34,985 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:45:45,064 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:45:54,992 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:46:06,310 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:46:15,135 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:46:25,087 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:46:35,082 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:46:45,056 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:46:54,997 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:47:05,011 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:47:15,074 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:47:25,144 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:47:35,147 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:47:45,079 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:47:55,153 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:48:05,080 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:48:54,158 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:49:49,908 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:49:53,448 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:50:01,259 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:50:12,155 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:50:22,146 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:50:29,193 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:50:39,236 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:50:49,261 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:51:00,150 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:51:10,161 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:51:19,205 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:51:19,670 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:51:23,213 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:51:24,574 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:51:27,211 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:51:29,760 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:51:31,212 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:51:34,674 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:51:35,213 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:51:39,655 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:51:40,171 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:51:43,656 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:51:44,955 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:51:47,657 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:51:50,173 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:51:51,658 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:51:55,128 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:51:55,662 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:51:59,664 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:52:00,144 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:52:03,660 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:52:05,140 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:52:07,666 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:52:10,149 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:52:11,668 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:52:15,184 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:52:15,667 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:52:19,664 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:52:20,146 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:52:23,658 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:52:25,159 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:52:27,656 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:52:30,164 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:52:31,654 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:52:35,149 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:52:35,666 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:52:52,180 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:52:52,659 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:52:54,754 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:52:55,664 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:52:56,752 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 19:52:57,452 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 19:52:59,252 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:52:59,757 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:00,404 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:00,893 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:04,002 INFO gpu_watchdog: GPU watchdog enabled=True
+2026-02-22 19:53:04,013 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:04,403 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:05,994 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:07,458 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:07,461 INFO ilo_fan: Executing iLO fan command: fan p 3 min 190
+2026-02-22 19:53:08,405 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:09,962 INFO gpu_watchdog: GPU watchdog mode transition: disabled -> failsafe
+2026-02-22 19:53:10,890 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:12,409 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:14,967 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:15,890 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:16,405 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:19,973 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:20,407 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:20,900 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:24,409 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:24,979 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:25,898 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:28,415 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:29,984 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:30,905 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:32,417 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:34,992 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:35,889 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:36,411 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:39,998 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:40,414 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:40,920 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:44,409 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:45,004 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:45,882 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:48,410 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:50,010 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:50,880 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:52,142 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:52,637 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:54,012 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:55,017 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:56,140 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:53:57,586 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:00,024 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:00,143 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:02,629 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:04,139 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:05,030 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:07,630 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:08,139 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:10,036 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:12,157 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:12,646 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:15,042 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:16,155 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:17,641 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:20,047 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:20,151 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:22,625 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:24,149 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:25,054 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:27,573 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:28,146 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:30,060 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:32,150 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:32,629 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:35,066 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:36,147 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:37,631 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:40,073 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:40,144 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:42,627 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:44,156 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:45,080 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:47,631 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:48,154 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:50,086 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:52,155 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:52,513 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:55,092 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:56,144 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:54:57,629 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:00,097 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:00,140 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:02,630 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:04,152 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:05,104 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:10,585 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-02-22 19:55:11,663 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:11,665 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:12,666 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:13,153 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:16,663 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:16,670 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:18,144 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:20,661 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:21,676 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:23,147 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:24,658 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:26,682 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:28,111 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:28,660 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:31,689 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:32,671 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:33,150 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:36,663 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:36,696 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:38,145 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:40,664 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:41,701 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:43,128 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:44,657 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:46,708 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:48,149 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:48,666 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:51,714 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:52,662 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:53,147 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:56,659 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:56,721 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:55:58,147 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:56:00,671 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:56:01,727 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:56:03,151 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:56:06,733 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:56:11,740 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:56:16,747 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:56:21,753 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:56:26,760 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:56:31,765 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:56:36,772 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:56:41,778 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:56:46,785 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:56:51,791 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:56:53,667 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:56:54,154 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:56:56,796 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:57:01,803 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:57:06,810 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:57:14,316 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-02-22 19:57:21,823 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-02-22 19:57:29,330 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-02-22 19:57:36,837 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-02-22 19:57:44,344 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-02-22 19:57:51,852 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-02-22 19:57:56,180 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-02-22 19:57:58,691 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-02-22 19:57:59,358 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-02-22 19:58:06,865 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-02-22 19:58:11,872 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:58:16,879 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:58:21,885 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:58:26,890 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:58:31,897 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:58:36,904 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:58:41,909 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:58:46,915 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:58:51,919 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:58:53,681 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:58:54,202 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:58:56,925 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:59:01,932 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:59:06,939 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:59:11,946 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:59:16,953 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:59:21,958 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:59:26,964 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:59:31,970 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:59:36,975 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:59:41,985 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:59:46,990 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:59:51,996 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:59:53,673 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:59:54,185 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 19:59:57,002 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:00:02,008 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:00:07,013 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:00:12,020 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:00:17,024 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:00:22,029 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:00:27,035 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:00:32,042 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:00:37,048 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:00:42,055 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:00:47,060 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:00:52,065 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:00:53,687 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:00:54,162 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:00:57,072 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:01:02,078 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:01:07,083 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:01:12,089 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:01:17,095 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:01:22,101 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:01:27,107 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:01:32,112 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:01:37,118 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:01:42,125 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:01:47,131 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:01:52,137 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:01:53,679 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:01:54,143 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:01:57,144 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:02:02,150 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:02:07,156 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:02:12,163 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:02:17,171 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:02:22,177 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:02:27,184 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:02:32,190 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:02:37,195 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:02:42,202 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:02:47,209 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:02:52,215 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:02:53,669 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:02:54,097 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:02:57,222 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:03:02,227 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:03:07,234 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:03:12,242 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:03:17,248 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:03:22,253 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:03:27,260 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:03:32,270 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:03:37,276 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:03:42,282 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:03:47,288 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:03:52,382 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:03:56,190 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-02-22 20:03:58,701 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-02-22 20:03:59,889 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-02-22 20:04:07,394 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-02-22 20:04:14,899 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-02-22 20:04:22,406 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-02-22 20:04:29,913 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-02-22 20:04:37,418 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-02-22 20:04:44,928 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-02-22 20:04:52,434 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-02-22 20:04:53,846 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:04:54,140 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:04:57,548 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:05:02,554 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:05:07,686 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:05:12,691 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:05:17,819 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:05:22,826 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:05:27,943 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:05:32,949 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:05:38,079 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:05:43,084 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:05:48,231 WARNING gpu_telemetry: GPU telemetry fetch failed: 404 Client Error: Not Found for url: http://192.168.8.33:61208/api/4/gpu
+2026-02-22 20:05:53,261 INFO gpu_watchdog: GPU watchdog leaving failsafe mode (telemetry healthy)
+2026-02-22 20:05:53,261 INFO ilo_fan: Executing iLO fan command: fan p 3 min 80
+2026-02-22 20:05:55,654 INFO gpu_watchdog: GPU watchdog mode transition: failsafe -> auto
+2026-02-22 20:08:12,822 INFO llm-agent: completions: translated embedded FIM tokens into {prompt,suffix} (suffix_len=319)
+2026-02-22 20:08:12,830 INFO llm-agent: completions request model=qwen2.5-coder:3b stream=True prompt_len=479 suffix_len=319 max_tokens=128 fim=True
+2026-02-22 20:08:16,072 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/completions "HTTP/1.1 200 OK"
+2026-02-22 20:08:28,723 INFO llm-agent: completions: translated embedded FIM tokens into {prompt,suffix} (suffix_len=397)
+2026-02-22 20:08:28,723 INFO llm-agent: completions request model=qwen2.5-coder:3b stream=True prompt_len=549 suffix_len=397 max_tokens=128 fim=True
+2026-02-22 20:08:29,541 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/completions "HTTP/1.1 200 OK"
+2026-02-22 20:08:29,950 INFO llm-agent: completions: translated embedded FIM tokens into {prompt,suffix} (suffix_len=395)
+2026-02-22 20:08:29,950 INFO llm-agent: completions request model=qwen2.5-coder:3b stream=True prompt_len=549 suffix_len=395 max_tokens=128 fim=True
+2026-02-22 20:08:30,465 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/completions "HTTP/1.1 200 OK"
+2026-02-22 20:08:31,831 INFO llm-agent: completions: translated embedded FIM tokens into {prompt,suffix} (suffix_len=397)
+2026-02-22 20:08:31,836 INFO llm-agent: completions request model=qwen2.5-coder:3b stream=True prompt_len=549 suffix_len=397 max_tokens=128 fim=True
+2026-02-22 20:08:32,569 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/completions "HTTP/1.1 200 OK"
+2026-02-22 20:08:34,537 INFO llm-agent: completions: translated embedded FIM tokens into {prompt,suffix} (suffix_len=395)
+2026-02-22 20:08:34,538 INFO llm-agent: completions request model=qwen2.5-coder:3b stream=True prompt_len=549 suffix_len=395 max_tokens=128 fim=True
+2026-02-22 20:08:35,216 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/completions "HTTP/1.1 200 OK"
+2026-02-22 20:08:36,210 INFO llm-agent: completions: translated embedded FIM tokens into {prompt,suffix} (suffix_len=397)
+2026-02-22 20:08:36,210 INFO llm-agent: completions request model=qwen2.5-coder:3b stream=True prompt_len=549 suffix_len=397 max_tokens=128 fim=True
+2026-02-22 20:08:36,868 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/completions "HTTP/1.1 200 OK"
+2026-02-22 20:08:58,472 INFO llm-agent: completions: translated embedded FIM tokens into {prompt,suffix} (suffix_len=398)
+2026-02-22 20:08:58,472 INFO llm-agent: completions request model=qwen2.5-coder:3b stream=True prompt_len=549 suffix_len=398 max_tokens=128 fim=True
+2026-02-22 20:08:59,077 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/completions "HTTP/1.1 200 OK"
