@@ -40,6 +40,7 @@ from comfyui_service import (
     get_comfyui_last_error,
 )
 from gpu_telemetry import get_gpu_telemetry
+from gpu_watchdog import GPUWatchdogService, parse_watchdog_control_payload
 from ilo_fan import set_ilo_fan_min, get_last_fan_command_result
 from logging_setup import configure_logging
 
@@ -60,6 +61,15 @@ async def _startup():
     asyncio.create_task(cpu_activity_poller())
     # Käynnistä ComfyUI idle-shutdown looppi
     asyncio.create_task(comfyui_idle_shutdown_loop())
+    app.state.gpu_watchdog = GPUWatchdogService()
+    await app.state.gpu_watchdog.start()
+
+
+@app.on_event("shutdown")
+async def _shutdown():
+    watchdog = getattr(app.state, "gpu_watchdog", None)
+    if watchdog is not None:
+        await watchdog.stop()
 
 @app.get("/", response_class=HTMLResponse)
 def index():
@@ -987,6 +997,36 @@ def api_gpu_telemetry():
     return get_gpu_telemetry()
 
 
+@app.get("/api/gpu_watchdog/status")
+def api_gpu_watchdog_status():
+    watchdog = getattr(app.state, "gpu_watchdog", None)
+    if watchdog is None:
+        return {"enabled": False, "mode": "disabled", "last_error": "watchdog service not initialized"}
+    return watchdog.get_status()
+
+
+@app.post("/api/gpu_watchdog/control")
+async def api_gpu_watchdog_control(request: Request):
+    watchdog = getattr(app.state, "gpu_watchdog", None)
+    if watchdog is None:
+        return {"ok": False, "error": "watchdog service not initialized"}
+
+    try:
+        payload = await request.json()
+    except Exception:
+        return {"ok": False, "error": "invalid JSON body"}
+
+    enabled, reset_error, parse_error = parse_watchdog_control_payload(payload)
+    if parse_error:
+        return {"ok": False, "error": parse_error}
+
+    if enabled is not None:
+        watchdog.set_enabled(enabled)
+    if reset_error:
+        watchdog.reset_error()
+    return {"ok": True, "status": watchdog.get_status()}
+
+
 @app.post("/api/ilo_fan/set_min")
 async def api_ilo_fan_set_min(request: Request):
     try:
@@ -1036,6 +1076,8 @@ def api_status():
     health, cpu_temp = get_lo100_health_and_temp()
     comfy_last = get_comfyui_last_activity()
     comfy_err = get_comfyui_last_error()
+    watchdog = getattr(app.state, "gpu_watchdog", None)
+    watchdog_status = watchdog.get_status() if watchdog is not None else None
 
     return {
         "llm_up": up,
@@ -1047,6 +1089,9 @@ def api_status():
         "comfyui_up": comfyui_up(),
         "comfyui_last_activity": comfy_last.isoformat(),
         "comfyui_last_error": comfy_err,
+        "gpu_watchdog_enabled": watchdog_status.get("enabled") if watchdog_status else False,
+        "gpu_watchdog_mode": watchdog_status.get("mode") if watchdog_status else "disabled",
+        "gpu_watchdog_last_error": watchdog_status.get("last_error") if watchdog_status else "watchdog service not initialized",
     }
 
 @app.post("/api/comfyui_wake")

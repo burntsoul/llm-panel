@@ -5168,3 +5168,81 @@ teemu@192.168.8.33: Permission denied (publickey,password).
 2026-02-22 16:59:14,922 WARNING ilo_fan: iLO fan command failed: unknown iLO SSH error
 2026-02-22 17:04:52,188 INFO ilo_fan: Executing iLO fan command: fan p 3 min 150
 2026-02-22 17:04:53,566 WARNING ilo_fan: iLO fan command failed: Host key verification failed.
+2026-02-22 17:08:57,650 INFO ilo_fan: Executing iLO fan command: fan p 3 min 150
+2026-02-22 17:08:58,986 WARNING ilo_fan: iLO fan command failed: iLO SSH command failed
+2026-02-22 17:13:13,984 INFO ilo_fan: Executing iLO fan command: fan p 3 min 150
+2026-02-22 17:13:15,328 WARNING ilo_fan: iLO fan command failed: iLO SSH command failed
+2026-02-22 17:20:34,281 INFO ilo_fan: Executing iLO fan command: fan p 3 min 150
+2026-02-22 17:20:42,604 INFO ilo_fan: Executing iLO fan command: fan p 3 min 50
+2026-02-22 17:29:04,208 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:29:04,212 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:29:08,416 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:29:08,419 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:29:12,190 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:29:12,192 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:29:15,939 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:29:15,942 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:29:19,717 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:29:19,719 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:29:23,489 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:29:23,491 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:29:27,457 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:29:27,460 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:29:31,210 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:29:31,213 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:29:34,938 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:29:34,941 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:29:38,770 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:29:38,773 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:29:42,690 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:29:42,692 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:29:46,438 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:29:46,441 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:29:50,195 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:29:50,197 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:29:55,531 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:29:55,534 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:29:59,452 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:29:59,454 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:30:03,247 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:30:03,251 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:30:07,204 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:30:07,206 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:30:10,982 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:30:10,984 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:30:14,719 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:30:14,721 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:30:18,438 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:30:18,440 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:30:22,512 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:30:22,515 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:30:26,687 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:30:26,696 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:30:30,693 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:30:30,695 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:30:34,700 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:30:34,702 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:30:38,440 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:30:38,442 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:30:42,388 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:30:42,393 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:30:46,189 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:30:46,191 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:30:50,012 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:30:50,014 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:30:54,198 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:30:54,200 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:30:57,970 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:30:57,971 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:31:01,737 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:31:01,742 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:31:05,696 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:31:05,699 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:31:09,504 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:31:09,506 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:31:13,449 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:31:13,452 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:31:17,265 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:31:17,268 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 17:31:21,187 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 17:31:21,189 INFO gpu_watchdog: GPU watchdog loop stopped
