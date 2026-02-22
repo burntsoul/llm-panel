@@ -5144,3 +5144,27 @@ teemu@192.168.8.33: Permission denied (publickey,password).
 2026-02-22 14:59:59,098 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
 2026-02-22 14:59:59,162 INFO llm-agent: chat_completions request model=deepseek-r1:8b stream=False messages=1 max_tokens=None
 2026-02-22 15:02:09,888 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-02-22 16:48:31,325 INFO ilo_fan: Executing iLO fan command: fan p 3 min 150
+2026-02-22 16:48:32,657 WARNING ilo_fan: iLO fan command failed: unknown iLO SSH error
+2026-02-22 16:50:13,784 INFO ilo_fan: Executing iLO fan command: fan p 3 min 150
+2026-02-22 16:50:15,164 WARNING ilo_fan: iLO fan command failed: unknown iLO SSH error
+2026-02-22 16:53:18,619 INFO ilo_fan: Executing iLO fan command: fan p 3 min 150
+2026-02-22 16:53:19,910 WARNING ilo_fan: iLO fan command failed: unknown iLO SSH error
+2026-02-22 16:57:46,310 INFO llm-agent: completions: translated embedded FIM tokens into {prompt,suffix} (suffix_len=512)
+2026-02-22 16:57:46,321 INFO llm-agent: completions request model=qwen2.5-coder:3b stream=True prompt_len=806 suffix_len=512 max_tokens=128 fim=True
+2026-02-22 16:57:49,671 INFO llm-agent: completions: translated embedded FIM tokens into {prompt,suffix} (suffix_len=498)
+2026-02-22 16:57:49,673 INFO llm-agent: completions request model=qwen2.5-coder:3b stream=True prompt_len=819 suffix_len=498 max_tokens=128 fim=True
+2026-02-22 16:57:56,987 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/completions "HTTP/1.1 200 OK"
+2026-02-22 16:58:12,931 INFO llm-agent: completions: translated embedded FIM tokens into {prompt,suffix} (suffix_len=491)
+2026-02-22 16:58:12,936 INFO llm-agent: completions request model=qwen2.5-coder:3b stream=True prompt_len=827 suffix_len=491 max_tokens=128 fim=True
+2026-02-22 16:58:13,699 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/completions "HTTP/1.1 200 OK"
+2026-02-22 16:58:21,063 INFO llm-agent: completions: translated embedded FIM tokens into {prompt,suffix} (suffix_len=491)
+2026-02-22 16:58:21,066 INFO llm-agent: completions request model=qwen2.5-coder:3b stream=True prompt_len=826 suffix_len=491 max_tokens=128 fim=True
+2026-02-22 16:58:21,730 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/completions "HTTP/1.1 200 OK"
+2026-02-22 16:58:22,187 INFO llm-agent: completions: translated embedded FIM tokens into {prompt,suffix} (suffix_len=498)
+2026-02-22 16:58:22,188 INFO llm-agent: completions request model=qwen2.5-coder:3b stream=True prompt_len=820 suffix_len=498 max_tokens=128 fim=True
+2026-02-22 16:58:22,706 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/completions "HTTP/1.1 200 OK"
+2026-02-22 16:59:13,499 INFO ilo_fan: Executing iLO fan command: fan p 3 min 150
+2026-02-22 16:59:14,922 WARNING ilo_fan: iLO fan command failed: unknown iLO SSH error
+2026-02-22 17:04:52,188 INFO ilo_fan: Executing iLO fan command: fan p 3 min 150
+2026-02-22 17:04:53,566 WARNING ilo_fan: iLO fan command failed: Host key verification failed.

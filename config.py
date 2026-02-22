@@ -129,6 +129,7 @@ class Settings:
         self.ILO_SSH_PORT = _env_int("ILO_SSH_PORT", 22)
         self.ILO_FAN_PATCH_INDEX = _env_int("ILO_FAN_PATCH_INDEX", 3)
         self.ILO_SSH_TIMEOUT_SECONDS = _env_float("ILO_SSH_TIMEOUT_SECONDS", 5.0)
+        self.ILO_SSH_STRICT_HOSTKEY = _env_bool("ILO_SSH_STRICT_HOSTKEY", True)
 
         # Backward-compatible aliases for existing IPMI health code
         self.ILO_IP = self.ILO_HOST
