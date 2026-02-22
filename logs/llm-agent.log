@@ -8467,3 +8467,6 @@ teemu@192.168.8.33: Permission denied (publickey,password).
 2026-02-22 19:12:16,450 INFO gpu_watchdog: GPU watchdog loop started
 2026-02-22 19:12:16,453 INFO gpu_watchdog: GPU watchdog loop stopped
 2026-02-22 19:15:23,615 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 19:27:20,708 INFO gpu_watchdog: GPU watchdog loop started
+2026-02-22 19:27:57,087 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-02-22 19:27:57,733 INFO gpu_watchdog: GPU watchdog loop started

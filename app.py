@@ -77,7 +77,32 @@ async def _shutdown():
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    up = llm_server_up()
+    try:
+        llm_vm = get_vm_status(settings.LLM_VM_ID)
+    except Exception as e:
+        llm_vm = f"ERROR: {e}"
+    try:
+        win_vm = get_vm_status(settings.WINDOWS_VM_ID)
+    except Exception as e:
+        win_vm = f"ERROR: {e}"
+
+    maintenance = get_maintenance_mode()
+    entries = get_model_display_entries()
+
+    return templates.TemplateResponse(
+        "index.html",
+        {
+            "request": request,
+            "llm_up": up,
+            "llm_vm": llm_vm,
+            "win_vm": win_vm,
+            "maintenance": maintenance,
+            "model_entries": entries,
+            "llm_vm_id": settings.LLM_VM_ID,
+            "windows_vm_id": settings.WINDOWS_VM_ID,
+        },
+    )
 
 
 @app.get("/legacy", response_class=HTMLResponse)

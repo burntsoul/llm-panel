@@ -5,6 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>LLM-agent</title>
     <link rel="stylesheet" href="/static/css/app.css" />
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+      window.MathJax = {
+        tex: { inlineMath: [["$", "$"], ["\\(", "\\)"]] },
+        svg: { fontCache: "global" },
+      };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg-full.js" async></script>
   </head>
   <body>
     <div class="app-shell">
@@ -12,10 +21,10 @@
         <header class="app-header">
           <div class="header-left">
             <strong class="app-title">LLM-agent</strong>
-            <span class="header-badge">New UI skeleton (Phase 1)</span>
+            <span class="header-badge">New UI skeleton (Phase 2)</span>
           </div>
           <div class="header-right">
-            <span class="header-placeholder">Header placeholder</span>
+            <span class="header-placeholder">Operational UI</span>
             <a class="legacy-link" href="/legacy">Open legacy UI</a>
           </div>
         </header>
@@ -29,10 +38,10 @@
         </nav>
 
         <div class="status-bar" aria-label="Status placeholders">
-          <span class="status-item">LLM VM: <strong>--</strong></span>
-          <span class="status-item">API: <strong>--</strong></span>
-          <span class="status-item">GPU: <strong>--</strong></span>
-          <span class="status-item">Watchdog: <strong>--</strong></span>
+          <span class="status-item">LLM VM: <strong id="top-llm-vm">--</strong></span>
+          <span class="status-item">API: <strong id="top-llm-api">--</strong></span>
+          <span class="status-item">GPU: <strong id="top-gpu">--</strong></span>
+          <span class="status-item">Watchdog: <strong id="top-watchdog">--</strong></span>
         </div>
       </div>
 
@@ -43,18 +52,63 @@
             <button class="subtab" type="button">Placeholder A</button>
             <button class="subtab" type="button">Placeholder B</button>
           </div>
-          <div class="panel-grid">
+
+          <div class="panel-grid two-col">
             <article class="panel-card">
-              <h2>LLM Control Overview</h2>
-              <p>Placeholder content for future LLM controls and health summaries.</p>
+              <div class="label">LLM CONTROL</div>
+              <h2>LLM-palvelin</h2>
+              <p>
+                <button class="link-button" id="open-models-btn" type="button">Nayta mallilista ja tila</button>
+              </p>
+              <p>
+                <a class="link-button" href="/tools/image-edit" target="_blank" rel="noopener">Avaa Image Edit -tyokalu</a>
+              </p>
+
+              <div class="status-list">
+                <p>LLM-VM tila: <b id="llm-vm-status">{{ llm_vm }}</b></p>
+                <p>Windows-VM tila: <b id="win-vm-status">{{ win_vm }}</b></p>
+                <p>Huoltotila: <b id="maintenance-status">{{ 'ON' if maintenance else 'OFF' }}</b></p>
+                <p>
+                  LLM API:
+                  <span id="llm-api-status" class="status-chip {{ 'status-ok' if llm_up else 'status-bad' }}">
+                    {{ 'UP' if llm_up else 'DOWN' }}
+                  </span>
+                </p>
+                <p>
+                  System health:
+                  <span id="system-health" class="status-chip status-bad">tuntematon</span>
+                </p>
+                <p>CPU0 lampotila: <span id="cpu-temp">-</span></p>
+              </div>
             </article>
+
             <article class="panel-card">
-              <h2>Model Operations</h2>
-              <p>Placeholder panel for model lifecycle actions and mode controls.</p>
-            </article>
-            <article class="panel-card">
-              <h2>Runtime Info</h2>
-              <p>Placeholder panel for runtime diagnostics and resource indicators.</p>
+              <div class="label">VM CONTROLS</div>
+              <h2>Power actions</h2>
+              <div class="power-group">
+                <div class="power-block">
+                  <b>LLM-VM ({{ llm_vm_id }})</b>
+                  <div class="button-row">
+                    <button type="button" data-power-action="llm_on">Start</button>
+                    <button type="button" data-power-action="llm_shutdown">Shutdown</button>
+                    <button type="button" data-power-action="llm_stop">Force stop</button>
+                  </div>
+                </div>
+                <div class="power-block">
+                  <b>Windows-VM ({{ windows_vm_id }})</b>
+                  <div class="button-row">
+                    <button type="button" data-power-action="win_on">Start</button>
+                    <button type="button" data-power-action="win_shutdown">Shutdown</button>
+                    <button type="button" data-power-action="win_stop">Force stop</button>
+                  </div>
+                </div>
+                <div class="power-block">
+                  <b>Huolto</b>
+                  <div class="button-row">
+                    <button type="button" data-power-action="maintenance_toggle">Toggle huoltotila</button>
+                  </div>
+                </div>
+              </div>
             </article>
           </div>
         </section>
@@ -65,18 +119,29 @@
             <button class="subtab" type="button">Placeholder A</button>
             <button class="subtab" type="button">Placeholder B</button>
           </div>
+
           <div class="panel-grid">
             <article class="panel-card">
-              <h2>Image Engine Overview</h2>
-              <p>Placeholder content for generation pipeline and queue visibility.</p>
+              <div class="label">IMAGE ENGINE</div>
+              <h2>ComfyUI</h2>
+              <div class="status-list">
+                <p>
+                  ComfyUI API:
+                  <span id="comfyui-status" class="status-chip status-bad">DOWN</span>
+                </p>
+                <p>Viimeisin aktiviteetti: <span id="comfyui-last-activity" class="muted">-</span></p>
+                <p>Viimeisin virhe: <span id="comfyui-last-error" class="muted">-</span></p>
+              </div>
+              <div class="button-row top-gap">
+                <button type="button" class="secondary" id="wake-comfyui-btn">Start ComfyUI</button>
+              </div>
+              <p class="muted top-gap">ComfyUI kaynnistetaan on-demand ja sammutetaan idlen jalkeen.</p>
             </article>
+
             <article class="panel-card">
-              <h2>Workflow Presets</h2>
-              <p>Placeholder panel for future workflow and template selection.</p>
-            </article>
-            <article class="panel-card">
-              <h2>Engine Status</h2>
-              <p>Placeholder panel for backend engine state and job metrics.</p>
+              <div class="label">PLACEHOLDER</div>
+              <h2>Future image controls</h2>
+              <p>Reserved panel for Phase 3 image workflow controls.</p>
             </article>
           </div>
         </section>
@@ -89,16 +154,9 @@
           </div>
           <div class="panel-grid">
             <article class="panel-card">
-              <h2>Links Overview</h2>
-              <p>Placeholder content for links and knowledge references.</p>
-            </article>
-            <article class="panel-card">
-              <h2>Collections</h2>
-              <p>Placeholder panel for future grouped resource lists and shortcuts.</p>
-            </article>
-            <article class="panel-card">
-              <h2>Recent Items</h2>
-              <p>Placeholder panel for recently touched references and notes.</p>
+              <div class="label">LINKS</div>
+              <h2>Placeholder</h2>
+              <p>Links rendering is intentionally deferred for a later phase.</p>
             </article>
           </div>
         </section>
@@ -109,18 +167,31 @@
             <button class="subtab" type="button">Placeholder A</button>
             <button class="subtab" type="button">Placeholder B</button>
           </div>
-          <div class="panel-grid">
+
+          <div class="panel-grid single-col">
             <article class="panel-card">
-              <h2>Chat Workspace</h2>
-              <p>Placeholder content for message stream and prompt controls.</p>
-            </article>
-            <article class="panel-card">
-              <h2>Session Tools</h2>
-              <p>Placeholder panel for future chat actions and presets.</p>
-            </article>
-            <article class="panel-card">
-              <h2>Context Controls</h2>
-              <p>Placeholder panel for context and model interaction settings.</p>
+              <div class="label">CHAT</div>
+              <h2>Conversation</h2>
+              <div id="chat-container"></div>
+              <div id="input-row">
+                <div id="model-select-wrap">
+                  <label for="model">Malli:</label>
+                  <select id="model">
+                    {% if model_entries %}
+                      {% for item in model_entries %}
+                        <option value="{{ item.id }}">{{ item.label }}</option>
+                      {% endfor %}
+                    {% else %}
+                      <option disabled>Ei malleja (ei konfiguroitu)</option>
+                    {% endif %}
+                  </select>
+                </div>
+                <textarea id="prompt" placeholder="Kirjoita viesti ja paina Laheta..."></textarea>
+                <div class="button-row">
+                  <button id="send-btn" class="primary" type="button">Laheta</button>
+                </div>
+                <div id="status-line"></div>
+              </div>
             </article>
           </div>
         </section>
@@ -131,22 +202,37 @@
             <button class="subtab" type="button">Placeholder A</button>
             <button class="subtab" type="button">Placeholder B</button>
           </div>
-          <div class="panel-grid">
+
+          <div class="panel-grid single-col">
             <article class="panel-card">
-              <h2>Logs Overview</h2>
-              <p>Placeholder content for log stream and diagnostics panels.</p>
-            </article>
-            <article class="panel-card">
-              <h2>Filters</h2>
-              <p>Placeholder panel for future log filtering and query controls.</p>
-            </article>
-            <article class="panel-card">
-              <h2>Alerts</h2>
-              <p>Placeholder panel for warnings, errors, and event summaries.</p>
+              <div class="label">LOGS</div>
+              <h2>LLM-agent logit</h2>
+              <div class="log-controls">
+                <label for="log-lines" class="muted">Riveja:</label>
+                <select id="log-lines">
+                  <option value="100">100</option>
+                  <option value="200" selected>200</option>
+                  <option value="500">500</option>
+                  <option value="1000">1000</option>
+                </select>
+                <button type="button" id="refresh-logs-btn">Hae logit</button>
+                <span id="log-path" class="muted"></span>
+              </div>
+              <div id="log-viewer" class="log-box">Logit eivat ole viela ladattu.</div>
             </article>
           </div>
         </section>
       </main>
+    </div>
+
+    <div id="modal-overlay" class="modal-overlay">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h2 id="modal-title"></h2>
+          <button class="modal-close" id="close-modal-btn" type="button">x</button>
+        </div>
+        <div id="modal-body"></div>
+      </div>
     </div>
 
     <script src="/static/js/app.js"></script>
