@@ -120,9 +120,19 @@ class Settings:
 
         # -------- iLO / IPMI (vain status, ei pakko) --------
         # (täytä llm_secrets.py:hin jos haluat sensorit mukaan)
-        self.ILO_IP = _secret("ILO_IP", _env("ILO_IP", ""))
+        self.ILO_HOST = _secret("ILO_HOST", _secret("ILO_IP", _env("ILO_HOST", _env("ILO_IP", ""))))
         self.ILO_USER = _secret("ILO_USER", _env("ILO_USER", ""))
-        self.ILO_PASS = _secret("ILO_PASS", _env("ILO_PASS", ""))
+        self.ILO_PASSWORD = _secret(
+            "ILO_PASSWORD",
+            _secret("ILO_PASS", _env("ILO_PASSWORD", _env("ILO_PASS", ""))),
+        )
+        self.ILO_SSH_PORT = _env_int("ILO_SSH_PORT", 22)
+        self.ILO_FAN_PATCH_INDEX = _env_int("ILO_FAN_PATCH_INDEX", 3)
+        self.ILO_SSH_TIMEOUT_SECONDS = _env_float("ILO_SSH_TIMEOUT_SECONDS", 5.0)
+
+        # Backward-compatible aliases for existing IPMI health code
+        self.ILO_IP = self.ILO_HOST
+        self.ILO_PASS = self.ILO_PASSWORD
 
         # -------- LLM-palvelin (Ollama) --------
         self.LLM_PORT = _env_int("LLM_PORT", 11434)
@@ -132,6 +142,13 @@ class Settings:
             _env("GLANCES_API_BASE", "")
             or f"http://{self.LLM_HOST}:61208/api/3"
         )
+        self.GPU_TELEMETRY_PROVIDER = _env("GPU_TELEMETRY_PROVIDER", "remote_glances")
+        self.GLANCES_API_BASE_V4 = _env(
+            "GLANCES_API_BASE_V4",
+            f"http://{self.LLM_HOST}:61208/api/4",
+        )
+        self.GLANCES_GPU_ID = _env("GLANCES_GPU_ID", "nvidia0")
+        self.GLANCES_TIMEOUT_SECONDS = _env_float("GLANCES_TIMEOUT_SECONDS", 2.5)
 
         # Idle-logiikka
         self.CPU_BUSY_THRESHOLD_FOR_IDLE = _env_float("CPU_BUSY_THRESHOLD_FOR_IDLE", 20.0)  # %

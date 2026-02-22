@@ -39,6 +39,8 @@ from comfyui_service import (
     get_comfyui_last_activity,
     get_comfyui_last_error,
 )
+from gpu_telemetry import get_gpu_telemetry
+from ilo_fan import set_ilo_fan_min, get_last_fan_command_result
 from logging_setup import configure_logging
 
 logger = logging.getLogger("llm-agent")
@@ -980,6 +982,36 @@ def api_wake_llm():
     return {"ok": ok, "up": llm_server_up()}
 
 
+@app.get("/api/gpu_telemetry")
+def api_gpu_telemetry():
+    return get_gpu_telemetry()
+
+
+@app.post("/api/ilo_fan/set_min")
+async def api_ilo_fan_set_min(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return {
+            "ok": False,
+            "xx": None,
+            "command": "",
+            "error": "invalid JSON body",
+            "timestamp": None,
+        }
+
+    xx = body.get("xx")
+    return set_ilo_fan_min(xx)
+
+
+@app.get("/api/ilo_fan/status")
+def api_ilo_fan_status():
+    last = get_last_fan_command_result()
+    if last is None:
+        return {"ok": False, "message": "no iLO fan command has been executed in this process"}
+    return last
+
+
 @app.get("/api/status")
 def api_status():
     """
@@ -1448,41 +1480,57 @@ async def completions(request: Request):
     elif prompt is None:
         prompt = ""
 
+    suffix = body.get("suffix")
+    suffix_len = len(suffix) if isinstance(suffix, str) else "n/a"
+    contains_fim = isinstance(prompt, str) and (
+        "<fim_" in prompt or "<|fim_" in prompt
+    )
+
+    # Continue (and some other clients) sometimes embed FIM tokens directly in `prompt`
+    # instead of using the OpenAI `suffix` field. Ollama's Qwen templates only enable
+    # true FIM mode when `suffix` is present, so we translate token-embedded prompts.
+    if isinstance(prompt, str) and (suffix is None or suffix == ""):
+        fim_prefix_tok = "<|fim_prefix|>"
+        fim_suffix_tok = "<|fim_suffix|>"
+        fim_middle_tok = "<|fim_middle|>"
+        if fim_prefix_tok in prompt and fim_suffix_tok in prompt and fim_middle_tok in prompt:
+            try:
+                # Take everything after <|fim_prefix|> as the prefix section.
+                after_prefix = prompt.split(fim_prefix_tok, 1)[1]
+                prefix_text, rest = after_prefix.split(fim_suffix_tok, 1)
+                suffix_text, _after_middle = rest.split(fim_middle_tok, 1)
+
+                prefix_text = prefix_text
+                suffix_text = suffix_text
+
+                # Ollama's template uses `if .Suffix` (empty string is false),
+                # so ensure suffix is non-empty even at EOF.
+                if suffix_text == "":
+                    suffix_text = "\n"
+
+                body["prompt"] = prefix_text
+                body["suffix"] = suffix_text
+                prompt = prefix_text
+                suffix = suffix_text
+                suffix_len = len(suffix_text)
+                contains_fim = True
+                logger.info(
+                    "completions: translated embedded FIM tokens into {prompt,suffix} (suffix_len=%s)",
+                    suffix_len,
+                )
+            except Exception:
+                # If parsing fails, fall back to the original payload.
+                pass
+
     logger.info(
-        "completions request model=%s stream=%s prompt_len=%s suffix_len=%s max_tokens=%s",
+        "completions request model=%s stream=%s prompt_len=%s suffix_len=%s max_tokens=%s fim=%s",
         body.get("model"),
         stream,
         len(prompt) if isinstance(prompt, str) else "n/a",
-        len(body.get("suffix") or "") if isinstance(body.get("suffix"), str) else "n/a",
+        suffix_len,
         max_tokens,
+        contains_fim,
     )
-
-    messages = [{"role": "user", "content": str(prompt)}]
-    system_prompt = body.get("system_prompt")
-    if system_prompt:
-        messages.insert(0, {"role": "system", "content": system_prompt})
-
-    upstream_payload = dict(body)
-    upstream_payload["messages"] = messages
-    if "prompt" in upstream_payload:
-        del upstream_payload["prompt"]
-    if "system_prompt" in upstream_payload:
-        del upstream_payload["system_prompt"]
-
-    if temperature is not None:
-        temperature = max(0.0, min(2.0, float(temperature)))
-        upstream_payload["temperature"] = temperature
-
-    if top_p is not None:
-        top_p = max(0.0, min(1.0, float(top_p)))
-        upstream_payload["top_p"] = top_p
-
-    if max_tokens is not None:
-        max_tokens = max(1, int(max_tokens))
-        upstream_payload["max_tokens"] = max_tokens
-
-    if stream:
-        upstream_payload["stream"] = True
 
     ready = await ensure_llm_running_and_ready()
     if not ready:
@@ -1496,19 +1544,46 @@ async def completions(request: Request):
             },
         )
 
-    upstream_url = f"{settings.LLM_SERVER_BASE}/v1/chat/completions"
+    # Prefer proxying the true /v1/completions endpoint upstream (best for FIM/tab autocomplete).
+    upstream_payload = dict(body)
+    if temperature is not None:
+        upstream_payload["temperature"] = max(0.0, min(2.0, float(temperature)))
+    if top_p is not None:
+        upstream_payload["top_p"] = max(0.0, min(1.0, float(top_p)))
+    if max_tokens is not None:
+        upstream_payload["max_tokens"] = max(1, int(max_tokens))
+    if stream:
+        upstream_payload["stream"] = True
+
+    upstream_url = f"{settings.LLM_SERVER_BASE}/v1/completions"
     headers = {"Content-Type": "application/json"}
     upstream_body = json.dumps(upstream_payload).encode("utf-8")
 
+    # Streaming: pass through SSE if upstream supports /v1/completions; otherwise fallback to chat proxy.
     if stream:
-        async def stream_from_upstream():
+        async def _stream_from_chat_fallback(prompt_text: str, original_body: dict, headers_in: dict):
+            # Build a chat request from the legacy prompt and map chat SSE chunks to completion SSE chunks.
+            messages = [{"role": "user", "content": str(prompt_text)}]
+            system_prompt = original_body.get("system_prompt")
+            if system_prompt:
+                messages.insert(0, {"role": "system", "content": system_prompt})
+
+            chat_payload = dict(original_body)
+            chat_payload["messages"] = messages
+            chat_payload.pop("prompt", None)
+            chat_payload.pop("system_prompt", None)
+            chat_payload["stream"] = True
+
+            chat_url = f"{settings.LLM_SERVER_BASE}/v1/chat/completions"
+            chat_body = json.dumps(chat_payload).encode("utf-8")
+
             buffer = b""
             async with httpx.AsyncClient(timeout=None) as client:
                 async with client.stream(
                     "POST",
-                    upstream_url,
-                    content=upstream_body,
-                    headers=headers,
+                    chat_url,
+                    content=chat_body,
+                    headers=headers_in,
                 ) as upstream_resp:
                     async for chunk in upstream_resp.aiter_bytes():
                         buffer += chunk
@@ -1531,6 +1606,24 @@ async def completions(request: Request):
                             out = json.dumps(mapped).encode("utf-8")
                             yield b"data: " + out + b"\n\n"
 
+        async def stream_from_upstream():
+            async with httpx.AsyncClient(timeout=None) as client:
+                async with client.stream(
+                    "POST",
+                    upstream_url,
+                    content=upstream_body,
+                    headers=headers,
+                ) as upstream_resp:
+                    if upstream_resp.status_code in (404, 405):
+                        # Fallback: emulate completions via chat/completions and map stream chunks.
+                        logger.info("upstream /v1/completions unsupported; falling back to chat proxy")
+                        async for item in _stream_from_chat_fallback(prompt, body, headers):
+                            yield item
+                        return
+
+                    async for chunk in upstream_resp.aiter_bytes():
+                        yield chunk
+
         return StreamingResponse(stream_from_upstream(), media_type="text/event-stream")
 
     async with httpx.AsyncClient(timeout=None) as client:
@@ -1539,6 +1632,46 @@ async def completions(request: Request):
             content=upstream_body,
             headers=headers,
         )
+
+    # If upstream doesn't implement /v1/completions, fallback to chat proxy and map response format.
+    if upstream_resp.status_code in (404, 405):
+        logger.info("upstream /v1/completions unsupported; falling back to chat proxy")
+
+        messages = [{"role": "user", "content": str(prompt)}]
+        system_prompt = body.get("system_prompt")
+        if system_prompt:
+            messages.insert(0, {"role": "system", "content": system_prompt})
+
+        chat_payload = dict(body)
+        chat_payload["messages"] = messages
+        chat_payload.pop("prompt", None)
+        chat_payload.pop("system_prompt", None)
+
+        chat_url = f"{settings.LLM_SERVER_BASE}/v1/chat/completions"
+        chat_body = json.dumps(chat_payload).encode("utf-8")
+
+        async with httpx.AsyncClient(timeout=None) as client:
+            upstream_resp = await client.post(
+                chat_url,
+                content=chat_body,
+                headers=headers,
+            )
+
+        try:
+            data = upstream_resp.json()
+        except Exception:
+            return JSONResponse(
+                status_code=502,
+                content={
+                    "error": {
+                        "message": "Invalid response from upstream",
+                        "type": "bad_gateway",
+                    }
+                },
+            )
+
+        mapped = _chat_to_completion_response(data)
+        return JSONResponse(status_code=upstream_resp.status_code, content=mapped)
 
     try:
         data = upstream_resp.json()
@@ -1553,8 +1686,8 @@ async def completions(request: Request):
             },
         )
 
-    mapped = _chat_to_completion_response(data)
-    return JSONResponse(status_code=upstream_resp.status_code, content=mapped)
+    # Upstream already returned a completion-shaped response; return as-is.
+    return JSONResponse(status_code=upstream_resp.status_code, content=data)
 
 
 @app.get("/api/embedding-models")
