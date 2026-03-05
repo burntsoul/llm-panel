@@ -21,7 +21,7 @@
         <header class="app-header">
           <div class="header-left">
             <strong class="app-title">LLM-agent</strong>
-            <span class="header-badge">New UI skeleton (Phase 2)</span>
+            <span class="header-badge">New UI skeleton (Phase 3.5)</span>
           </div>
           <div class="header-right">
             <span class="header-placeholder">Operational UI</span>
@@ -37,220 +37,355 @@
           <button class="main-tab" data-tab="logs" type="button">LOGS</button>
         </nav>
 
-        <div class="status-bar" aria-label="Status placeholders">
-          <span class="status-item">LLM VM: <strong id="top-llm-vm">--</strong></span>
-          <span class="status-item">API: <strong id="top-llm-api">--</strong></span>
-          <span class="status-item">GPU: <strong id="top-gpu">--</strong></span>
-          <span class="status-item">Watchdog: <strong id="top-watchdog">--</strong></span>
+        <div class="status-bar" aria-label="Status at a glance">
+          <span class="status-item">LLM VM <span id="top-llm-vm" class="status-pill tone-neutral">--</span></span>
+          <span class="status-item">Ollama/API <span id="top-api" class="status-pill tone-neutral">--</span></span>
+          <span class="status-item">GPU <span id="top-gpu" class="status-pill tone-neutral">--</span></span>
+          <span class="status-item">Watchdog <span id="top-watchdog" class="status-pill tone-neutral">--</span></span>
+          <span class="status-item">ComfyUI <span id="top-comfyui" class="status-pill tone-neutral">--</span></span>
+          <span class="status-item status-refresh">Last refresh <span id="top-last-refresh">--</span></span>
         </div>
       </div>
 
       <main class="content-area">
         <section class="tab-panel" data-panel="llm" aria-label="LLM CONTROL panel">
-          <div class="subtabs" aria-label="LLM submenu">
-            <button class="subtab active" type="button">Main</button>
-            <button class="subtab" type="button">Placeholder A</button>
-            <button class="subtab" type="button">Placeholder B</button>
+          <div class="subtabs" data-subtab-group="llm" aria-label="LLM submenu">
+            <button class="subtab" data-subtab="overview" type="button">Overview</button>
+            <button class="subtab" data-subtab="vm-controls" type="button">VM Controls</button>
+            <button class="subtab" data-subtab="thermal" type="button">Thermal</button>
+            <button class="subtab" data-subtab="health" type="button">Health</button>
+            <button class="subtab" data-subtab="models" type="button">Models</button>
           </div>
 
-          <div class="panel-grid two-col">
-            <article class="panel-card">
-              <div class="label">LLM CONTROL</div>
-              <h2>LLM-palvelin</h2>
-              <p>
-                <button class="link-button" id="open-models-btn" type="button">Nayta mallilista ja tila</button>
-              </p>
-              <p>
-                <a class="link-button" href="/tools/image-edit" target="_blank" rel="noopener">Avaa Image Edit -tyokalu</a>
-              </p>
+          <div class="subtab-panel" data-subtab-panel="sections">
+            <div class="panel-grid two-col">
+              <article class="panel-card llm-section" id="llm-section-overview">
+                <div class="label">OVERVIEW</div>
+                <h2>LLM Control Summary</h2>
+                <div class="status-list">
+                  <p>LLM VM: <b id="llm-vm-status">{{ llm_vm }}</b></p>
+                  <p>Windows VM: <b id="win-vm-status">{{ win_vm }}</b></p>
+                  <p>Maintenance: <b id="maintenance-status">{{ 'ON' if maintenance else 'OFF' }}</b></p>
+                  <p>
+                    Ollama/API:
+                    <span id="llm-api-status" class="status-chip {{ 'status-ok' if llm_up else 'status-bad' }}">
+                      {{ 'UP' if llm_up else 'DOWN' }}
+                    </span>
+                  </p>
+                </div>
+                <p class="muted">Use the submenu above to jump directly to controls, thermal, health, and models sections.</p>
+              </article>
 
-              <div class="status-list">
-                <p>LLM-VM tila: <b id="llm-vm-status">{{ llm_vm }}</b></p>
-                <p>Windows-VM tila: <b id="win-vm-status">{{ win_vm }}</b></p>
-                <p>Huoltotila: <b id="maintenance-status">{{ 'ON' if maintenance else 'OFF' }}</b></p>
+              <article class="panel-card llm-section" id="llm-section-vm-controls">
+                <div class="label">VM CONTROLS</div>
+                <h2>Power actions</h2>
+                <div class="power-group">
+                  <div class="power-block">
+                    <b>LLM-VM ({{ llm_vm_id }})</b>
+                    <div class="button-row">
+                      <button type="button" data-power-action="llm_on">Start</button>
+                      <button type="button" data-power-action="llm_shutdown">Shutdown</button>
+                      <button type="button" data-power-action="llm_stop">Force stop</button>
+                    </div>
+                  </div>
+                  <div class="power-block">
+                    <b>Windows-VM ({{ windows_vm_id }})</b>
+                    <div class="button-row">
+                      <button type="button" data-power-action="win_on">Start</button>
+                      <button type="button" data-power-action="win_shutdown">Shutdown</button>
+                      <button type="button" data-power-action="win_stop">Force stop</button>
+                    </div>
+                  </div>
+                  <div class="power-block">
+                    <b>Huolto</b>
+                    <div class="button-row">
+                      <button type="button" data-power-action="maintenance_toggle">Toggle huoltotila</button>
+                    </div>
+                  </div>
+                </div>
+              </article>
+
+              <article class="panel-card llm-section" id="llm-section-thermal">
+                <div class="label">GPU THERMAL</div>
+                <h2>GPU Thermal / Watchdog</h2>
+
+                <div class="watchdog-controls">
+                  <button type="button" id="watchdog-enable-btn" class="secondary">Enable</button>
+                  <button type="button" id="watchdog-disable-btn">Disable</button>
+                  <button type="button" id="watchdog-reset-btn">Reset error</button>
+                </div>
+                <p id="watchdog-action-status" class="watchdog-action-status muted">No action yet.</p>
+
+                <div class="watchdog-grid">
+                  <div class="watchdog-row"><span>Watchdog enabled</span><strong id="wd-enabled">--</strong></div>
+                  <div class="watchdog-row"><span>Watchdog mode</span><strong id="wd-mode">--</strong></div>
+                  <div class="watchdog-row"><span>Telemetry status</span><strong id="wd-telemetry-ok">--</strong></div>
+                  <div class="watchdog-row"><span>GPU name / id</span><strong id="wd-gpu-name-id">--</strong></div>
+                  <div class="watchdog-row"><span>GPU temperature</span><strong id="wd-gpu-temp">--</strong></div>
+                  <div class="watchdog-row"><span>GPU utilization</span><strong id="wd-gpu-util">--</strong></div>
+                  <div class="watchdog-row"><span>GPU memory util</span><strong id="wd-gpu-mem-util">--</strong></div>
+                  <div class="watchdog-row"><span>Last target fan min xx</span><strong id="wd-last-target">--</strong></div>
+                  <div class="watchdog-row"><span>Last applied fan min xx</span><strong id="wd-last-applied">--</strong></div>
+                  <div class="watchdog-row"><span>Last command status</span><strong id="wd-last-command-ok">--</strong></div>
+                  <div class="watchdog-row"><span>Last command timestamp</span><strong id="wd-last-command-at">--</strong></div>
+                  <div class="watchdog-row"><span>Last update timestamp</span><strong id="wd-updated-at">--</strong></div>
+                  <div class="watchdog-row"><span>Last error</span><strong id="wd-last-error">--</strong></div>
+                </div>
+
+                <p class="watchdog-settings muted" id="wd-settings-summary">Poll/hysteresis/failsafe: --</p>
+              </article>
+
+              <article class="panel-card llm-section" id="llm-section-health">
+                <div class="label">SYSTEM HEALTH</div>
+                <h2>iLO / sensors</h2>
+                <div class="status-list">
+                  <p>
+                    System health:
+                    <span id="system-health" class="status-chip status-bad">tuntematon</span>
+                  </p>
+                  <p>CPU0 lampotila: <span id="cpu-temp">-</span></p>
+                </div>
+                <p class="muted">Health values reuse the current backend status endpoint with safe fallbacks.</p>
+              </article>
+
+              <article class="panel-card llm-section" id="llm-section-models">
+                <div class="label">MODELS / API STATUS</div>
+                <h2>Model inventory and API</h2>
                 <p>
-                  LLM API:
-                  <span id="llm-api-status" class="status-chip {{ 'status-ok' if llm_up else 'status-bad' }}">
-                    {{ 'UP' if llm_up else 'DOWN' }}
-                  </span>
+                  <button class="link-button" id="open-models-btn" type="button">Nayta mallilista ja tila</button>
                 </p>
-                <p>
-                  System health:
-                  <span id="system-health" class="status-chip status-bad">tuntematon</span>
-                </p>
-                <p>CPU0 lampotila: <span id="cpu-temp">-</span></p>
-              </div>
-            </article>
-
-            <article class="panel-card">
-              <div class="label">VM CONTROLS</div>
-              <h2>Power actions</h2>
-              <div class="power-group">
-                <div class="power-block">
-                  <b>LLM-VM ({{ llm_vm_id }})</b>
-                  <div class="button-row">
-                    <button type="button" data-power-action="llm_on">Start</button>
-                    <button type="button" data-power-action="llm_shutdown">Shutdown</button>
-                    <button type="button" data-power-action="llm_stop">Force stop</button>
-                  </div>
-                </div>
-                <div class="power-block">
-                  <b>Windows-VM ({{ windows_vm_id }})</b>
-                  <div class="button-row">
-                    <button type="button" data-power-action="win_on">Start</button>
-                    <button type="button" data-power-action="win_shutdown">Shutdown</button>
-                    <button type="button" data-power-action="win_stop">Force stop</button>
-                  </div>
-                </div>
-                <div class="power-block">
-                  <b>Huolto</b>
-                  <div class="button-row">
-                    <button type="button" data-power-action="maintenance_toggle">Toggle huoltotila</button>
-                  </div>
-                </div>
-              </div>
-            </article>
-
-            <article class="panel-card">
-              <div class="label">GPU THERMAL</div>
-              <h2>GPU Thermal / Watchdog</h2>
-
-              <div class="watchdog-controls">
-                <button type="button" id="watchdog-enable-btn" class="secondary">Enable</button>
-                <button type="button" id="watchdog-disable-btn">Disable</button>
-                <button type="button" id="watchdog-reset-btn">Reset error</button>
-              </div>
-              <p id="watchdog-action-status" class="watchdog-action-status muted">No action yet.</p>
-
-              <div class="watchdog-grid">
-                <div class="watchdog-row"><span>Watchdog enabled</span><strong id="wd-enabled">--</strong></div>
-                <div class="watchdog-row"><span>Watchdog mode</span><strong id="wd-mode">--</strong></div>
-                <div class="watchdog-row"><span>Telemetry status</span><strong id="wd-telemetry-ok">--</strong></div>
-                <div class="watchdog-row"><span>GPU name / id</span><strong id="wd-gpu-name-id">--</strong></div>
-                <div class="watchdog-row"><span>GPU temperature</span><strong id="wd-gpu-temp">--</strong></div>
-                <div class="watchdog-row"><span>GPU utilization</span><strong id="wd-gpu-util">--</strong></div>
-                <div class="watchdog-row"><span>GPU memory util</span><strong id="wd-gpu-mem-util">--</strong></div>
-                <div class="watchdog-row"><span>Last target fan min xx</span><strong id="wd-last-target">--</strong></div>
-                <div class="watchdog-row"><span>Last applied fan min xx</span><strong id="wd-last-applied">--</strong></div>
-                <div class="watchdog-row"><span>Last command status</span><strong id="wd-last-command-ok">--</strong></div>
-                <div class="watchdog-row"><span>Last command timestamp</span><strong id="wd-last-command-at">--</strong></div>
-                <div class="watchdog-row"><span>Last update timestamp</span><strong id="wd-updated-at">--</strong></div>
-                <div class="watchdog-row"><span>Last error</span><strong id="wd-last-error">--</strong></div>
-              </div>
-
-              <p class="watchdog-settings muted" id="wd-settings-summary">Poll/hysteresis/failsafe: --</p>
-            </article>
+                <p class="muted">Model list and current backend-reported state open in the existing modal view.</p>
+              </article>
+            </div>
           </div>
         </section>
 
         <section class="tab-panel" data-panel="image" aria-label="IMAGE ENGINE panel">
-          <div class="subtabs" aria-label="IMAGE submenu">
-            <button class="subtab active" type="button">Main</button>
-            <button class="subtab" type="button">Placeholder A</button>
-            <button class="subtab" type="button">Placeholder B</button>
+          <div class="subtabs" data-subtab-group="image" aria-label="IMAGE submenu">
+            <button class="subtab" data-subtab="main" type="button">Main</button>
+            <button class="subtab" data-subtab="image-edit" type="button">Image Edit Tool</button>
+            <button class="subtab" data-subtab="future" type="button">Future</button>
           </div>
 
-          <div class="panel-grid">
-            <article class="panel-card">
-              <div class="label">IMAGE ENGINE</div>
-              <h2>ComfyUI</h2>
-              <div class="status-list">
-                <p>
-                  ComfyUI API:
-                  <span id="comfyui-status" class="status-chip status-bad">DOWN</span>
-                </p>
-                <p>Viimeisin aktiviteetti: <span id="comfyui-last-activity" class="muted">-</span></p>
-                <p>Viimeisin virhe: <span id="comfyui-last-error" class="muted">-</span></p>
-              </div>
-              <div class="button-row top-gap">
-                <button type="button" class="secondary" id="wake-comfyui-btn">Start ComfyUI</button>
-              </div>
-              <p class="muted top-gap">ComfyUI kaynnistetaan on-demand ja sammutetaan idlen jalkeen.</p>
-            </article>
+          <div class="subtab-panel" data-subtab-panel="main">
+            <div class="panel-grid">
+              <article class="panel-card">
+                <div class="label">IMAGE ENGINE</div>
+                <h2>ComfyUI</h2>
+                <div class="status-list">
+                  <p>
+                    ComfyUI API:
+                    <span id="comfyui-status" class="status-chip status-bad">DOWN</span>
+                  </p>
+                  <p>Viimeisin aktiviteetti: <span id="comfyui-last-activity" class="muted">-</span></p>
+                  <p>Viimeisin virhe: <span id="comfyui-last-error" class="muted">-</span></p>
+                </div>
+                <div class="button-row top-gap">
+                  <button type="button" class="secondary" id="wake-comfyui-btn">Start ComfyUI</button>
+                </div>
+                <p class="muted top-gap">ComfyUI kaynnistetaan on-demand ja sammutetaan idlen jalkeen.</p>
+              </article>
 
-            <article class="panel-card">
-              <div class="label">PLACEHOLDER</div>
-              <h2>Future image controls</h2>
-              <p>Reserved panel for Phase 3 image workflow controls.</p>
-            </article>
+              <article class="panel-card">
+                <div class="label">TOOLS</div>
+                <h2>Image tools</h2>
+                <p>Use the <b>Image Edit Tool</b> subtab for in-tab editing workflow.</p>
+                <p><a class="legacy-link" href="/tools/image-edit" target="_blank" rel="noopener">Open standalone /tools/image-edit</a></p>
+              </article>
+            </div>
+          </div>
+
+          <div class="subtab-panel" data-subtab-panel="image-edit">
+            <div class="panel-grid image-edit-grid">
+              <article class="panel-card">
+                <div class="label">IMAGE EDIT TOOL</div>
+                <h2>Editor controls</h2>
+
+                <label for="ie-image-input">Image</label>
+                <input type="file" id="ie-image-input" accept="image/*" />
+
+                <div class="toolbar top-gap">
+                  <label for="ie-brush-size">Brush</label>
+                  <input type="number" id="ie-brush-size" value="24" min="4" max="120" />
+                  <button type="button" id="ie-clear-mask">Clear mask</button>
+                </div>
+
+                <label for="ie-prompt">Prompt</label>
+                <textarea id="ie-prompt" rows="5">remove selected detail, preserve layout</textarea>
+
+                <label for="ie-model">Model (checkpoint filename)</label>
+                <input
+                  type="text"
+                  id="ie-model"
+                  value="{{ comfyui_default_checkpoint }}"
+                  placeholder="sd_xl_base_1.0.safetensors"
+                />
+                <div class="muted">Tyhja = kayttaa oletusta.</div>
+
+                <label for="ie-response-format">Response format</label>
+                <select id="ie-response-format">
+                  <option value="b64_json">b64_json</option>
+                  <option value="url">url</option>
+                </select>
+
+                <label class="top-gap">
+                  <input type="checkbox" id="ie-invert-mask" />
+                  Invert mask (toggle if edits happen outside selection)
+                </label>
+
+                <label for="ie-n">n</label>
+                <input type="number" id="ie-n" value="1" min="1" max="4" />
+
+                <label for="ie-denoise">Denoise</label>
+                <input type="number" id="ie-denoise" value="0.7" min="0.05" max="0.95" step="0.05" />
+
+                <label for="ie-steps">Steps</label>
+                <input type="number" id="ie-steps" value="35" min="10" max="60" />
+
+                <label for="ie-cfg-scale">CFG scale</label>
+                <input type="number" id="ie-cfg-scale" value="6" min="1" max="12" step="0.5" />
+
+                <label for="ie-sampler">Sampler</label>
+                <select id="ie-sampler">
+                  <option value="dpmpp_2m_sde">dpmpp_2m_sde</option>
+                  <option value="dpmpp_2m">dpmpp_2m</option>
+                  <option value="euler">euler</option>
+                </select>
+
+                <label for="ie-scheduler">Scheduler</label>
+                <select id="ie-scheduler">
+                  <option value="normal">normal</option>
+                  <option value="karras">karras</option>
+                </select>
+
+                <div class="toolbar top-gap">
+                  <button type="button" id="ie-send-edit" class="primary">Send edit</button>
+                </div>
+                <div class="muted" id="ie-status"></div>
+              </article>
+
+              <article class="panel-card">
+                <div class="label">CANVAS</div>
+                <h2>Mask and preview</h2>
+                <div class="canvas-wrap" id="ie-canvas-wrap">
+                  <canvas id="ie-image-canvas"></canvas>
+                  <canvas id="ie-mask-canvas"></canvas>
+                </div>
+                <p class="muted">Maski: valkoinen = muokkaa, musta = sailyta.</p>
+
+                <div class="preview" id="ie-preview"></div>
+
+                <div class="history-card">
+                  <div class="label">History</div>
+                  <div class="history" id="ie-history"></div>
+                  <p class="muted">Klikkaa kuvaa kayttaaksesi sita uudeksi inputiksi.</p>
+                </div>
+              </article>
+            </div>
+          </div>
+
+          <div class="subtab-panel" data-subtab-panel="future">
+            <div class="panel-grid single-col">
+              <article class="panel-card">
+                <div class="label">PLACEHOLDER</div>
+                <h2>Future image controls</h2>
+                <p>Reserved panel for future image workflow controls.</p>
+              </article>
+            </div>
           </div>
         </section>
 
         <section class="tab-panel" data-panel="links" aria-label="LINKS panel">
-          <div class="subtabs" aria-label="LINKS submenu">
-            <button class="subtab active" type="button">Main</button>
-            <button class="subtab" type="button">Placeholder A</button>
-            <button class="subtab" type="button">Placeholder B</button>
+          <div class="subtabs" data-subtab-group="links" aria-label="LINKS submenu">
+            <button class="subtab" data-subtab="main" type="button">Main</button>
+            <button class="subtab" data-subtab="placeholder-a" type="button">Placeholder A</button>
+            <button class="subtab" data-subtab="placeholder-b" type="button">Placeholder B</button>
           </div>
-          <div class="panel-grid">
-            <article class="panel-card">
-              <div class="label">LINKS</div>
-              <h2>Placeholder</h2>
-              <p>Links rendering is intentionally deferred for a later phase.</p>
-            </article>
+
+          <div class="subtab-panel" data-subtab-panel="main">
+            <div class="panel-grid">
+              <article class="panel-card">
+                <div class="label">LINKS</div>
+                <h2>Placeholder</h2>
+                <p>Links rendering is intentionally deferred for a later phase.</p>
+              </article>
+            </div>
           </div>
+
+          <div class="subtab-panel" data-subtab-panel="placeholder-a"></div>
+          <div class="subtab-panel" data-subtab-panel="placeholder-b"></div>
         </section>
 
         <section class="tab-panel" data-panel="chat" aria-label="CHAT panel">
-          <div class="subtabs" aria-label="CHAT submenu">
-            <button class="subtab active" type="button">Main</button>
-            <button class="subtab" type="button">Placeholder A</button>
-            <button class="subtab" type="button">Placeholder B</button>
+          <div class="subtabs" data-subtab-group="chat" aria-label="CHAT submenu">
+            <button class="subtab" data-subtab="main" type="button">Main</button>
+            <button class="subtab" data-subtab="placeholder-a" type="button">Placeholder A</button>
+            <button class="subtab" data-subtab="placeholder-b" type="button">Placeholder B</button>
           </div>
 
-          <div class="panel-grid single-col">
-            <article class="panel-card">
-              <div class="label">CHAT</div>
-              <h2>Conversation</h2>
-              <div id="chat-container"></div>
-              <div id="input-row">
-                <div id="model-select-wrap">
-                  <label for="model">Malli:</label>
-                  <select id="model">
-                    {% if model_entries %}
-                      {% for item in model_entries %}
-                        <option value="{{ item.id }}">{{ item.label }}</option>
-                      {% endfor %}
-                    {% else %}
-                      <option disabled>Ei malleja (ei konfiguroitu)</option>
-                    {% endif %}
-                  </select>
+          <div class="subtab-panel" data-subtab-panel="main">
+            <div class="panel-grid single-col">
+              <article class="panel-card">
+                <div class="label">CHAT</div>
+                <h2>Conversation</h2>
+                <div id="chat-container"></div>
+                <div id="input-row">
+                  <div id="model-select-wrap">
+                    <label for="model">Malli:</label>
+                    <select id="model">
+                      {% if model_entries %}
+                        {% for item in model_entries %}
+                          <option value="{{ item.id }}">{{ item.label }}</option>
+                        {% endfor %}
+                      {% else %}
+                        <option disabled>Ei malleja (ei konfiguroitu)</option>
+                      {% endif %}
+                    </select>
+                  </div>
+                  <textarea id="prompt" placeholder="Kirjoita viesti ja paina Laheta..."></textarea>
+                  <div class="button-row">
+                    <button id="send-btn" class="primary" type="button">Laheta</button>
+                  </div>
+                  <div id="status-line"></div>
                 </div>
-                <textarea id="prompt" placeholder="Kirjoita viesti ja paina Laheta..."></textarea>
-                <div class="button-row">
-                  <button id="send-btn" class="primary" type="button">Laheta</button>
-                </div>
-                <div id="status-line"></div>
-              </div>
-            </article>
+              </article>
+            </div>
           </div>
+
+          <div class="subtab-panel" data-subtab-panel="placeholder-a"></div>
+          <div class="subtab-panel" data-subtab-panel="placeholder-b"></div>
         </section>
 
         <section class="tab-panel" data-panel="logs" aria-label="LOGS panel">
-          <div class="subtabs" aria-label="LOGS submenu">
-            <button class="subtab active" type="button">Main</button>
-            <button class="subtab" type="button">Placeholder A</button>
-            <button class="subtab" type="button">Placeholder B</button>
+          <div class="subtabs" data-subtab-group="logs" aria-label="LOGS submenu">
+            <button class="subtab" data-subtab="main" type="button">Main</button>
+            <button class="subtab" data-subtab="placeholder-a" type="button">Placeholder A</button>
+            <button class="subtab" data-subtab="placeholder-b" type="button">Placeholder B</button>
           </div>
 
-          <div class="panel-grid single-col">
-            <article class="panel-card">
-              <div class="label">LOGS</div>
-              <h2>LLM-agent logit</h2>
-              <div class="log-controls">
-                <label for="log-lines" class="muted">Riveja:</label>
-                <select id="log-lines">
-                  <option value="100">100</option>
-                  <option value="200" selected>200</option>
-                  <option value="500">500</option>
-                  <option value="1000">1000</option>
-                </select>
-                <button type="button" id="refresh-logs-btn">Hae logit</button>
-                <span id="log-path" class="muted"></span>
-              </div>
-              <div id="log-viewer" class="log-box">Logit eivat ole viela ladattu.</div>
-            </article>
+          <div class="subtab-panel" data-subtab-panel="main">
+            <div class="panel-grid single-col">
+              <article class="panel-card">
+                <div class="label">LOGS</div>
+                <h2>LLM-agent logit</h2>
+                <div class="log-controls">
+                  <label for="log-lines" class="muted">Riveja:</label>
+                  <select id="log-lines">
+                    <option value="100">100</option>
+                    <option value="200" selected>200</option>
+                    <option value="500">500</option>
+                    <option value="1000">1000</option>
+                  </select>
+                  <button type="button" id="refresh-logs-btn">Hae logit</button>
+                  <span id="log-path" class="muted"></span>
+                </div>
+                <div id="log-viewer" class="log-box">Logit eivat ole viela ladattu.</div>
+              </article>
+            </div>
           </div>
+
+          <div class="subtab-panel" data-subtab-panel="placeholder-a"></div>
+          <div class="subtab-panel" data-subtab-panel="placeholder-b"></div>
         </section>
       </main>
     </div>

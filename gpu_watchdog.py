@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from config import settings
 from gpu_telemetry import get_gpu_telemetry
 from ilo_fan import set_ilo_fan_min
+from proxmox import get_vm_status
 
 
 logger = logging.getLogger(__name__)
@@ -16,13 +17,14 @@ logger = logging.getLogger(__name__)
 
 MODE_DISABLED = "disabled"
 MODE_AUTO = "auto"
+MODE_VM_OFF_IDLE = "vm_off_idle"
 MODE_FAILSAFE = "failsafe"
 
 DEFAULT_POLICY = (
-    {"name": "lt60", "min_temp": None, "max_temp": 59.999, "xx": 20},
-    {"name": "60-67", "min_temp": 60.0, "max_temp": 67.999, "xx": 100},
-    {"name": "68-73", "min_temp": 68.0, "max_temp": 73.999, "xx": 150},
-    {"name": "74-79", "min_temp": 74.0, "max_temp": 79.999, "xx": 190},
+    {"name": "lt40", "min_temp": None, "max_temp": 39.999, "xx": 30},
+    {"name": "40-58", "min_temp": 40.0, "max_temp": 57.999, "xx": 40},
+    {"name": "58-63", "min_temp": 58.0, "max_temp": 63.999, "xx": 90},
+    {"name": "64-79", "min_temp": 64.0, "max_temp": 79.999, "xx": 150},
     {"name": "ge80", "min_temp": 80.0, "max_temp": None, "xx": 230},
 )
 
@@ -77,10 +79,12 @@ class GPUWatchdogService:
         self,
         telemetry_getter: Callable[[], Dict[str, Any]] = get_gpu_telemetry,
         fan_setter: Callable[[int], Dict[str, Any]] = set_ilo_fan_min,
+        vm_state_getter: Optional[Callable[[], str]] = None,
         monotonic_fn: Callable[[], float] = time.monotonic,
     ) -> None:
         self._telemetry_getter = telemetry_getter
         self._fan_setter = fan_setter
+        self._vm_state_getter = vm_state_getter or (lambda: get_vm_status(settings.LLM_VM_ID))
         self._monotonic = monotonic_fn
         self._task: Optional[asyncio.Task] = None
 
@@ -88,6 +92,9 @@ class GPUWatchdogService:
         self._poll_seconds = float(settings.WATCHDOG_POLL_SECONDS)
         self._min_change_interval_seconds = float(settings.WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS)
         self._failsafe_fan_min_xx = int(settings.WATCHDOG_FAILSAFE_FAN_MIN_XX)
+        self._vm_off_idle_enabled = bool(settings.GPU_WATCHDOG_VM_OFF_IDLE_ENABLED)
+        self._vm_off_fan_min_xx = int(settings.GPU_WATCHDOG_VM_OFF_FAN_MIN_XX)
+        self._vm_startup_grace_seconds = float(settings.GPU_WATCHDOG_VM_STARTUP_GRACE_SECONDS)
         self._hysteresis_c = float(settings.WATCHDOG_HYSTERESIS_C)
         self._telemetry_stale_seconds = float(settings.WATCHDOG_TELEMETRY_STALE_SECONDS)
         self._log_transitions_only = bool(settings.WATCHDOG_LOG_TRANSITIONS_ONLY)
@@ -102,6 +109,9 @@ class GPUWatchdogService:
         self._last_command_at: Optional[str] = None
         self._last_error: Optional[str] = None
         self._status_updated_at = _utc_now_iso()
+        self._mode_reason = "watchdog_disabled"
+        self._vm_state: Optional[str] = None
+        self._telemetry_applicable = True
 
         self._telemetry_source = "remote_glances"
         self._telemetry_ok = False
@@ -128,6 +138,9 @@ class GPUWatchdogService:
         return {
             "enabled": self._enabled,
             "mode": self._mode,
+            "mode_reason": self._mode_reason,
+            "vm_state": self._vm_state,
+            "telemetry_applicable": self._telemetry_applicable,
             "telemetry_source": self._telemetry_source,
             "telemetry_ok": self._telemetry_ok,
             "gpu_name": self._gpu_name,
@@ -137,6 +150,7 @@ class GPUWatchdogService:
             "gpu_mem_util_percent": self._gpu_mem_util_percent,
             "last_target_xx": self._last_target_xx,
             "last_applied_xx": self._last_applied_xx,
+            "last_applied_fan_xx": self._last_applied_xx,
             "last_command_ok": self._last_command_ok,
             "last_command_at": self._last_command_at,
             "last_error": self._last_error,
@@ -144,6 +158,9 @@ class GPUWatchdogService:
             "poll_seconds": self._poll_seconds,
             "min_change_interval_seconds": self._min_change_interval_seconds,
             "failsafe_fan_min_xx": self._failsafe_fan_min_xx,
+            "vm_off_idle_enabled": self._vm_off_idle_enabled,
+            "vm_off_fan_min_xx": self._vm_off_fan_min_xx,
+            "vm_startup_grace_seconds": self._vm_startup_grace_seconds,
             "hysteresis_c": self._hysteresis_c,
             "thresholds": self._policy_summary(),
         }
@@ -152,6 +169,7 @@ class GPUWatchdogService:
         self._enabled = bool(enabled)
         if not self._enabled:
             self._mode = MODE_DISABLED
+            self._mode_reason = "watchdog_disabled"
         self._status_updated_at = _utc_now_iso()
         if self._log_transitions_only:
             logger.info("GPU watchdog enabled=%s", self._enabled)
@@ -226,6 +244,32 @@ class GPUWatchdogService:
         age = (datetime.datetime.utcnow() - dt).total_seconds()
         return age > self._telemetry_stale_seconds
 
+    def _read_vm_state(self) -> Optional[str]:
+        try:
+            raw = self._vm_state_getter()
+        except Exception as exc:
+            self._vm_state = f"ERROR: {exc}"
+            return None
+        if raw is None:
+            self._vm_state = None
+            return None
+        value = str(raw).strip()
+        self._vm_state = value or None
+        return self._vm_state
+
+    @staticmethod
+    def _is_vm_running(vm_state: Optional[str]) -> bool:
+        return isinstance(vm_state, str) and vm_state.strip().lower() == "running"
+
+    @staticmethod
+    def _is_vm_known_not_running(vm_state: Optional[str]) -> bool:
+        if not isinstance(vm_state, str):
+            return False
+        lowered = vm_state.strip().lower()
+        if not lowered or lowered.startswith("error"):
+            return False
+        return lowered != "running"
+
     async def _apply_target_if_needed(self, target_xx: int) -> None:
         self._last_target_xx = target_xx
         now = self._monotonic()
@@ -256,13 +300,40 @@ class GPUWatchdogService:
 
         if self._config_error:
             self._mode = MODE_DISABLED
+            self._mode_reason = "config_error"
+            self._telemetry_applicable = False
             self._last_error = self._config_error
             return
 
         if not self._enabled:
             self._mode = MODE_DISABLED
+            self._mode_reason = "watchdog_disabled"
+            self._telemetry_applicable = False
+            self._last_error = None
             return
 
+        vm_state = self._read_vm_state()
+        vm_running = self._is_vm_running(vm_state)
+        vm_known_not_running = self._is_vm_known_not_running(vm_state)
+
+        if self._vm_off_idle_enabled and vm_known_not_running:
+            self._mode = MODE_VM_OFF_IDLE
+            self._mode_reason = f"vm_{str(vm_state).strip().lower()}"
+            self._telemetry_applicable = False
+            self._telemetry_ok = False
+            self._gpu_name = None
+            self._gpu_id = None
+            self._gpu_temp_c = None
+            self._gpu_util_percent = None
+            self._gpu_mem_util_percent = None
+            self._last_error = None
+            await self._apply_target_if_needed(self._vm_off_fan_min_xx)
+            if self._last_transition_mode != self._mode:
+                logger.info("GPU watchdog mode transition: %s -> %s", self._last_transition_mode, self._mode)
+                self._last_transition_mode = self._mode
+            return
+
+        self._telemetry_applicable = True
         telemetry: Dict[str, Any]
         try:
             telemetry = await asyncio.to_thread(self._telemetry_getter)
@@ -288,17 +359,25 @@ class GPUWatchdogService:
 
         if not healthy:
             self._mode = MODE_FAILSAFE
+            self._mode_reason = "telemetry_invalid"
             if stale:
                 self._last_error = "telemetry stale"
+                self._mode_reason = "telemetry_stale"
             elif telemetry_error:
                 self._last_error = f"telemetry error: {telemetry_error}"
+                self._mode_reason = "telemetry_error"
             else:
                 self._last_error = "telemetry invalid"
+            if vm_running:
+                self._mode_reason = f"{self._mode_reason}_vm_running"
+            elif vm_state is None:
+                self._mode_reason = f"{self._mode_reason}_vm_unknown"
             await self._apply_target_if_needed(self._failsafe_fan_min_xx)
         else:
             if self._mode == MODE_FAILSAFE:
                 logger.info("GPU watchdog leaving failsafe mode (telemetry healthy)")
             self._mode = MODE_AUTO
+            self._mode_reason = "temp_curve"
             self._last_error = None
             target = self.target_xx_for_temp(float(self._gpu_temp_c), self._last_target_xx)
             await self._apply_target_if_needed(target)
@@ -316,4 +395,3 @@ class GPUWatchdogService:
         except asyncio.CancelledError:
             logger.info("GPU watchdog loop stopped")
             raise
-

@@ -150,19 +150,46 @@ class Settings:
         )
         self.GLANCES_GPU_ID = _env("GLANCES_GPU_ID", "nvidia0")
         self.GLANCES_TIMEOUT_SECONDS = _env_float("GLANCES_TIMEOUT_SECONDS", 2.5)
-        self.WATCHDOG_ENABLED = _env_bool("WATCHDOG_ENABLED", False)
-        self.WATCHDOG_POLL_SECONDS = _env_float("WATCHDOG_POLL_SECONDS", 5.0)
-        self.WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS = _env_float(
-            "WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS",
-            20.0,
+        self.GPU_WATCHDOG_ENABLED = _env_bool(
+            "GPU_WATCHDOG_ENABLED",
+            _env_bool("WATCHDOG_ENABLED", False),
         )
-        self.WATCHDOG_FAILSAFE_FAN_MIN_XX = _env_int("WATCHDOG_FAILSAFE_FAN_MIN_XX", 190)
-        self.WATCHDOG_HYSTERESIS_C = _env_float("WATCHDOG_HYSTERESIS_C", 4.0)
-        self.WATCHDOG_TELEMETRY_STALE_SECONDS = _env_float(
-            "WATCHDOG_TELEMETRY_STALE_SECONDS",
-            15.0,
+        self.GPU_WATCHDOG_POLL_SECONDS = _env_float(
+            "GPU_WATCHDOG_POLL_SECONDS",
+            _env_float("WATCHDOG_POLL_SECONDS", 5.0),
         )
-        self.WATCHDOG_LOG_TRANSITIONS_ONLY = _env_bool("WATCHDOG_LOG_TRANSITIONS_ONLY", True)
+        self.GPU_WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS = _env_float(
+            "GPU_WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS",
+            _env_float("WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS", 20.0),
+        )
+        self.GPU_WATCHDOG_FAILSAFE_FAN_MIN_XX = _env_int(
+            "GPU_WATCHDOG_FAILSAFE_FAN_MIN_XX",
+            _env_int("WATCHDOG_FAILSAFE_FAN_MIN_XX", 190),
+        )
+        self.GPU_WATCHDOG_HYSTERESIS_C = _env_float(
+            "GPU_WATCHDOG_HYSTERESIS_C",
+            _env_float("WATCHDOG_HYSTERESIS_C", 4.0),
+        )
+        self.GPU_WATCHDOG_TELEMETRY_STALE_SECONDS = _env_float(
+            "GPU_WATCHDOG_TELEMETRY_STALE_SECONDS",
+            _env_float("WATCHDOG_TELEMETRY_STALE_SECONDS", 15.0),
+        )
+        self.GPU_WATCHDOG_LOG_TRANSITIONS_ONLY = _env_bool(
+            "GPU_WATCHDOG_LOG_TRANSITIONS_ONLY",
+            _env_bool("WATCHDOG_LOG_TRANSITIONS_ONLY", True),
+        )
+        self.GPU_WATCHDOG_VM_OFF_IDLE_ENABLED = _env_bool("GPU_WATCHDOG_VM_OFF_IDLE_ENABLED", True)
+        self.GPU_WATCHDOG_VM_OFF_FAN_MIN_XX = _env_int("GPU_WATCHDOG_VM_OFF_FAN_MIN_XX", 50)
+        self.GPU_WATCHDOG_VM_STARTUP_GRACE_SECONDS = _env_float("GPU_WATCHDOG_VM_STARTUP_GRACE_SECONDS", 30.0)
+
+        # Backward-compatible aliases
+        self.WATCHDOG_ENABLED = self.GPU_WATCHDOG_ENABLED
+        self.WATCHDOG_POLL_SECONDS = self.GPU_WATCHDOG_POLL_SECONDS
+        self.WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS = self.GPU_WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS
+        self.WATCHDOG_FAILSAFE_FAN_MIN_XX = self.GPU_WATCHDOG_FAILSAFE_FAN_MIN_XX
+        self.WATCHDOG_HYSTERESIS_C = self.GPU_WATCHDOG_HYSTERESIS_C
+        self.WATCHDOG_TELEMETRY_STALE_SECONDS = self.GPU_WATCHDOG_TELEMETRY_STALE_SECONDS
+        self.WATCHDOG_LOG_TRANSITIONS_ONLY = self.GPU_WATCHDOG_LOG_TRANSITIONS_ONLY
 
         # Idle-logiikka
         self.CPU_BUSY_THRESHOLD_FOR_IDLE = _env_float("CPU_BUSY_THRESHOLD_FOR_IDLE", 20.0)  # %

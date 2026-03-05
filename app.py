@@ -101,6 +101,7 @@ def index(request: Request):
             "model_entries": entries,
             "llm_vm_id": settings.LLM_VM_ID,
             "windows_vm_id": settings.WINDOWS_VM_ID,
+            "comfyui_default_checkpoint": settings.COMFYUI_DEFAULT_CHECKPOINT or "",
         },
     )
 

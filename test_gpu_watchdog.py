@@ -6,6 +6,7 @@ from gpu_watchdog import (
     GPUWatchdogService,
     MODE_AUTO,
     MODE_FAILSAFE,
+    MODE_VM_OFF_IDLE,
     parse_watchdog_control_payload,
 )
 
@@ -38,6 +39,9 @@ class TestGpuWatchdog(unittest.IsolatedAsyncioTestCase):
             patch("gpu_watchdog.settings.WATCHDOG_POLL_SECONDS", 5.0),
             patch("gpu_watchdog.settings.WATCHDOG_TELEMETRY_STALE_SECONDS", 15.0),
             patch("gpu_watchdog.settings.WATCHDOG_LOG_TRANSITIONS_ONLY", True),
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_VM_OFF_IDLE_ENABLED", True),
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_VM_OFF_FAN_MIN_XX", 50),
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_VM_STARTUP_GRACE_SECONDS", 30.0),
         )
 
     async def test_temp_mapping_and_hysteresis(self):
@@ -46,9 +50,13 @@ class TestGpuWatchdog(unittest.IsolatedAsyncioTestCase):
             p.start()
         self.addCleanup(lambda: [p.stop() for p in patches])
 
-        svc = GPUWatchdogService(telemetry_getter=lambda: _telemetry_sample(65.0), fan_setter=lambda xx: {"ok": True, "timestamp": "2026-01-01T00:00:01Z"})
-        self.assertEqual(svc.target_xx_for_temp(59.0, 110), 110)
-        self.assertEqual(svc.target_xx_for_temp(55.0, 110), 80)
+        svc = GPUWatchdogService(
+            telemetry_getter=lambda: _telemetry_sample(65.0),
+            fan_setter=lambda xx: {"ok": True, "timestamp": "2026-01-01T00:00:01Z"},
+            vm_state_getter=lambda: "running",
+        )
+        self.assertEqual(svc.target_xx_for_temp(59.0, 110), 90)
+        self.assertEqual(svc.target_xx_for_temp(55.0, 90), 90)
         self.assertEqual(svc.target_xx_for_temp(81.0, 190), 230)
 
     async def test_failsafe_on_telemetry_error(self):
@@ -69,7 +77,11 @@ class TestGpuWatchdog(unittest.IsolatedAsyncioTestCase):
             "error": "timeout",
             "updated_at": datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
         }
-        svc = GPUWatchdogService(telemetry_getter=lambda: telemetry, fan_setter=fan_setter)
+        svc = GPUWatchdogService(
+            telemetry_getter=lambda: telemetry,
+            fan_setter=fan_setter,
+            vm_state_getter=lambda: "running",
+        )
         await svc.step_once()
 
         status = svc.get_status()
@@ -97,20 +109,71 @@ class TestGpuWatchdog(unittest.IsolatedAsyncioTestCase):
         svc = GPUWatchdogService(
             telemetry_getter=telemetry_getter,
             fan_setter=fan_setter,
+            vm_state_getter=lambda: "running",
             monotonic_fn=lambda: now_value["t"],
         )
 
         await svc.step_once()
-        self.assertEqual(calls, [190])
+        self.assertEqual(calls, [150])
         self.assertEqual(svc.get_status()["mode"], MODE_AUTO)
 
         temps["value"] = 82.0
         await svc.step_once()
-        self.assertEqual(calls, [190])
+        self.assertEqual(calls, [150])
 
         now_value["t"] = 21.0
         await svc.step_once()
-        self.assertEqual(calls, [190, 230])
+        self.assertEqual(calls, [150, 230])
+
+    async def test_vm_stopped_uses_vm_off_idle_mode(self):
+        patches = self._settings_patches()
+        for p in patches:
+            p.start()
+        self.addCleanup(lambda: [p.stop() for p in patches])
+
+        calls = []
+
+        def fan_setter(xx: int):
+            calls.append(xx)
+            return {"ok": True, "timestamp": "2026-01-01T00:00:01Z"}
+
+        svc = GPUWatchdogService(
+            telemetry_getter=lambda: {"telemetry_ok": False, "error": "timeout"},
+            fan_setter=fan_setter,
+            vm_state_getter=lambda: "stopped",
+        )
+        await svc.step_once()
+
+        status = svc.get_status()
+        self.assertEqual(status["mode"], MODE_VM_OFF_IDLE)
+        self.assertEqual(status["mode_reason"], "vm_stopped")
+        self.assertFalse(status["telemetry_applicable"])
+        self.assertEqual(calls, [50])
+        self.assertEqual(status["last_target_xx"], 50)
+
+    async def test_vm_state_unknown_uses_conservative_failsafe(self):
+        patches = self._settings_patches()
+        for p in patches:
+            p.start()
+        self.addCleanup(lambda: [p.stop() for p in patches])
+
+        calls = []
+
+        def fan_setter(xx: int):
+            calls.append(xx)
+            return {"ok": True, "timestamp": "2026-01-01T00:00:01Z"}
+
+        svc = GPUWatchdogService(
+            telemetry_getter=lambda: {"telemetry_ok": False, "error": "timeout"},
+            fan_setter=fan_setter,
+            vm_state_getter=lambda: (_ for _ in ()).throw(RuntimeError("proxmox unavailable")),
+        )
+        await svc.step_once()
+
+        status = svc.get_status()
+        self.assertEqual(status["mode"], MODE_FAILSAFE)
+        self.assertTrue(status["telemetry_applicable"])
+        self.assertEqual(calls, [190])
 
 
 class TestGpuWatchdogControlPayload(unittest.TestCase):
