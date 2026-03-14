@@ -1,0 +1,72 @@
+name: teemu-llm-agent
+version: 0.0.1
+schema: v1
+
+models:
+  - name: Qwen Coder 32k
+    provider: openai
+    apiBase: http://192.168.8.36:8000/v1
+    model: qwen3coder-32k:latest 
+    capabilities:
+      - tool_use
+    roles:
+      - chat
+      - edit
+      - apply
+
+  - name: Qwen Coder 128k
+    provider: openai
+    apiBase: http://192.168.8.36:8000/v1
+    model: qwen3coder-128k:latest 
+    capabilities:
+      - tool_use
+    roles:
+      - chat
+      - edit
+      - apply
+
+# (valinnainen mutta suositeltava) embeddings codebase-hakuun
+  - name: Embeddings via llm-agent
+    provider: openai
+    apiBase: http://192.168.8.36:8000/v1
+    model: nomic-embed-text
+    roles:
+      - embed
+
+  - name: Qwen2.5-coder via llm-agent
+    provider: openai
+    apiBase: http://192.168.8.36:8000/v1
+    model: qwen2.5-coder:3b
+    roles:
+      - autocomplete
+    promptTemplates:
+      autocomplete: |
+        `
+        globalThis.importantFunc = importantFunc
+        <|fim_prefix|>{{{prefix}}}<|fim_suffix|>{{{suffix}}}<|fim_middle|>
+        `
+    autocompleteOptions:
+      maxPromptTokens: 1024
+      onlyMyCode: True
+    defaultCompletionOptions:
+      maxTokens: 128
+
+  - name: deepseek-r1:8b via llm-agent
+    provider: openai
+    apiBase: http://192.168.8.36:8000/v1
+    model: deepseek-r1:8b
+    roles:
+      - autocomplete
+    promptTemplates:
+      autocomplete: |
+        `
+        globalThis.importantFunc = importantFunc
+        <|fim_prefix|>{{{prefix}}}<|fim_suffix|>{{{suffix}}}<|fim_middle|>
+        `
+    autocompleteOptions:
+      maxPromptTokens: 1024
+      onlyMyCode: True
+    defaultCompletionOptions:
+      maxTokens: 128
+
+        
