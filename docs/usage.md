@@ -256,6 +256,10 @@ Common statuses:
 - `503`: upstream LLM not ready.
 - `504`: proxy timeout to upstream.
 
+Timeout guidance for OCR/vision:
+- Set client request timeout to at least the agent's proxy timeout (`PROXY_UPSTREAM_TIMEOUT_SECONDS`, default `300`).
+- For large page tiles or heavy models, increase `PROXY_UPSTREAM_TIMEOUT_SECONDS` and client timeout together.
+
 ## 7. Python Example (end-to-end)
 
 ```python
@@ -290,4 +294,3 @@ print(resp.json())
 # 3) Release
 requests.post(f"{BASE}/v1/lease/{lease_id}/release", headers=HEADERS, timeout=30)
 ```
-

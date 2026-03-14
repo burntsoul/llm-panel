@@ -12,6 +12,7 @@ import unittest
 import asyncio
 import json
 from unittest.mock import patch, MagicMock, AsyncMock
+import httpx
 
 from fastapi.testclient import TestClient
 
@@ -257,11 +258,13 @@ class TestLeaseAPI(unittest.TestCase):
     def test_proxy_forward_request(self, mock_client_class):
         """Test proxy forwards requests correctly."""
         # Mock the HTTP client
+        payload = b'{"tags":[]}'
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {"tags": []}
-        mock_response.headers = {"content-type": "application/json"}
-        mock_response.text = "{}"
+        mock_response.headers = {"content-type": "application/json", "content-length": str(len(payload))}
+        mock_response.text = payload.decode("utf-8")
+        mock_response.content = payload
 
         mock_client = AsyncMock()
         mock_client.__aenter__.return_value = mock_client
@@ -276,7 +279,100 @@ class TestLeaseAPI(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, payload)
         mock_client.request.assert_called_once()
+        mock_client_class.assert_called_once_with(
+            timeout=settings.PROXY_UPSTREAM_TIMEOUT_SECONDS
+        )
+
+    @patch("lease_api.httpx.AsyncClient")
+    def test_proxy_nonstream_json_passthrough_and_header_sanitization(self, mock_client_class):
+        """Test proxy preserves JSON bytes and strips framing/hop-by-hop headers."""
+        payload = b'{"ok":true,"result":"pass-through"}'
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {
+            "content-type": "application/json",
+            "content-length": str(len(payload)),
+            "transfer-encoding": "chunked",
+            "content-encoding": "gzip",
+            "connection": "keep-alive",
+            "server": "ollama",
+            "date": "Thu, 01 Jan 1970 00:00:00 GMT",
+            "x-upstream-trace-id": "abc-123",
+        }
+        mock_response.content = payload
+        mock_response.text = payload.decode("utf-8")
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client.request = AsyncMock(return_value=mock_response)
+        mock_client_class.return_value = mock_client
+
+        response = self.client.get(
+            "/v1/proxy/api/tags",
+            headers=self._headers(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, payload)
+        self.assertEqual(response.headers.get("content-type"), "application/json")
+        self.assertEqual(response.headers.get("x-upstream-trace-id"), "abc-123")
+        self.assertIsNone(response.headers.get("transfer-encoding"))
+        self.assertIsNone(response.headers.get("content-encoding"))
+        self.assertIsNone(response.headers.get("connection"))
+        self.assertIsNone(response.headers.get("server"))
+        self.assertIsNone(response.headers.get("date"))
+
+    @patch("lease_api.httpx.AsyncClient")
+    def test_proxy_non_json_passthrough(self, mock_client_class):
+        """Test proxy forwards non-JSON payloads without JSON parsing."""
+        payload = b"not-json-response"
+        mock_response = MagicMock()
+        mock_response.status_code = 502
+        mock_response.headers = {
+            "content-type": "text/plain; charset=utf-8",
+            "content-length": str(len(payload)),
+        }
+        mock_response.content = payload
+        mock_response.text = payload.decode("utf-8")
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client.request = AsyncMock(return_value=mock_response)
+        mock_client_class.return_value = mock_client
+
+        response = self.client.get(
+            "/v1/proxy/api/tags",
+            headers=self._headers(),
+        )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.content, payload)
+        self.assertEqual(
+            response.headers.get("content-type"),
+            "text/plain; charset=utf-8",
+        )
+
+    @patch("lease_api.httpx.AsyncClient")
+    def test_proxy_timeout_returns_504(self, mock_client_class):
+        """Test proxy timeout is mapped to 504."""
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client.request = AsyncMock(side_effect=httpx.TimeoutException("request timed out"))
+        mock_client_class.return_value = mock_client
+
+        response = self.client.get(
+            "/v1/proxy/api/tags",
+            headers=self._headers(),
+        )
+
+        self.assertEqual(response.status_code, 504)
+        data = response.json()
+        self.assertEqual(data.get("detail"), "LLM server request timeout")
 
     @patch("lease_api.httpx.AsyncClient")
     def test_proxy_with_lease_id(self, mock_client_class):
@@ -299,6 +395,7 @@ class TestLeaseAPI(unittest.TestCase):
         mock_response.json.return_value = {"tags": []}
         mock_response.headers = {"content-type": "application/json"}
         mock_response.text = "{}"
+        mock_response.content = b"{}"
 
         mock_client = AsyncMock()
         mock_client.__aenter__.return_value = mock_client

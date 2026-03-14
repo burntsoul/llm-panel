@@ -1,6 +1,7 @@
 # config.py
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -82,6 +83,18 @@ def _env_bool(name: str, default: bool = False) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in ("1", "true", "yes", "y", "on")
+
+
+def _load_model_meta() -> dict[str, dict]:
+    """Load model metadata from model_meta.json. Returns empty dict if file is missing or invalid."""
+    try:
+        meta_path = Path(__file__).with_name("model_meta.json")
+        if not meta_path.exists():
+            return {}
+        with open(meta_path, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {}
 
 
 class Settings:
@@ -204,12 +217,9 @@ class Settings:
         self.STATE_PATH = _env("STATE_PATH", str(Path(__file__).with_name("state.json")))
         self.MAINTENANCE_DEFAULT = _env_bool("MAINTENANCE_DEFAULT", False)
 
-        # Mitkä mallit näkyvät, vaikka LLM olisi down
-        default_models_raw = _env(
-            "DEFAULT_MODELS",
-            "deepseek-coder:1.3b,deepseek-coder:6.7b",
-        )
-        self.DEFAULT_MODELS = [m.strip() for m in default_models_raw.split(",") if m.strip()]
+        # Fallback models when LLM is unavailable: dynamically loaded from model_meta.json
+        model_meta = _load_model_meta()
+        self.DEFAULT_MODELS = list(model_meta.keys())
 
         # OpenAI-yhteensopiva base-URL (sama host/port kuin Ollama)
         self.LLM_SERVER_BASE = _env(
@@ -302,6 +312,10 @@ class Settings:
         # -------- Lease & Proxy API --------
         # Shared secret token for lease/proxy endpoints (required for auth)
         self.LLM_AGENT_TOKEN = _secret("LLM_AGENT_TOKEN", "")
+        self.PROXY_UPSTREAM_TIMEOUT_SECONDS = _conf_float(
+            "PROXY_UPSTREAM_TIMEOUT_SECONDS",
+            300.0,
+        )
 
         # -------- Logging --------
         self.LOG_LEVEL = _conf("LOG_LEVEL", "INFO")

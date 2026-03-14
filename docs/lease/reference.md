@@ -71,6 +71,10 @@ export LEASE_DEFAULT_TTL="3600"
 # Default: 120
 export LLM_READINESS_TIMEOUT="120"
 
+# Upstream timeout for /v1/proxy/* requests (seconds)
+# Default: 300
+export PROXY_UPSTREAM_TIMEOUT_SECONDS="300"
+
 # Polling interval when checking readiness (seconds)
 # Default: 2.0
 export LLM_READINESS_POLL_INTERVAL="2.0"
@@ -357,6 +361,7 @@ requests.post(f"{BASE}/v1/lease/{lease_id}/release", headers=headers)
 ### Proxy Request Hangs
 - Check health: `curl http://localhost:8000/v1/health`
 - Increase timeout in client
+- Increase `PROXY_UPSTREAM_TIMEOUT_SECONDS` for long OCR/vision requests (for example `300`-`600`)
 - Check LLM logs on VM
 
 ## Performance & Scaling

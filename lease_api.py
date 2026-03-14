@@ -15,7 +15,7 @@ import asyncio
 from typing import Optional, Dict, Any
 
 from fastapi import APIRouter, HTTPException, Header, status, Request
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, Response
 import httpx
 
 from config import settings
@@ -43,6 +43,28 @@ _warmup_status: Dict[str, Any] = {
 }
 
 
+_RESPONSE_HOP_BY_HOP_HEADERS = {
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+}
+
+_RESPONSE_FRAMING_HEADERS = {
+    "content-length",
+    "content-encoding",
+}
+
+_RESPONSE_AGENT_MANAGED_HEADERS = {
+    "server",
+    "date",
+}
+
+
 def _extract_token(authorization: Optional[str]) -> Optional[str]:
     """Extract bearer token from Authorization header."""
     if not authorization:
@@ -51,6 +73,22 @@ def _extract_token(authorization: Optional[str]) -> Optional[str]:
     if len(parts) == 2 and parts[0].lower() == "bearer":
         return parts[1]
     return None
+
+
+def _sanitize_upstream_response_headers(headers: Dict[str, str]) -> Dict[str, str]:
+    """
+    Remove upstream headers that can break proxy framing or conflict with ASGI server headers.
+    """
+    blocked = (
+        _RESPONSE_HOP_BY_HOP_HEADERS
+        | _RESPONSE_FRAMING_HEADERS
+        | _RESPONSE_AGENT_MANAGED_HEADERS
+    )
+    return {
+        k: v
+        for k, v in headers.items()
+        if k.lower() not in blocked
+    }
 
 
 async def _ensure_llm_ready_concurrent(timeout: int | None = None) -> bool:
@@ -432,7 +470,7 @@ async def _proxy_forward(
     )
 
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=settings.PROXY_UPSTREAM_TIMEOUT_SECONDS) as client:
             response = await client.request(
                 method=method,
                 url=target_url,
@@ -440,10 +478,23 @@ async def _proxy_forward(
                 content=body,
             )
 
+            if response.status_code >= 400:
+                try:
+                    preview = response.content[:300].decode("utf-8", errors="replace")
+                except Exception:
+                    preview = "<unable to decode upstream body preview>"
+                logger.warning(
+                    "Proxy upstream non-2xx response path=%s status=%s body_preview=%r",
+                    path,
+                    response.status_code,
+                    preview,
+                )
+
             # Touch activity
             touch_activity()
 
             # Handle streaming responses (e.g., from /v1/chat/completions with stream=true)
+            sanitized_headers = _sanitize_upstream_response_headers(dict(response.headers))
             if (
                 "text/event-stream" in response.headers.get("content-type", "")
                 or "application/x-ndjson" in response.headers.get("content-type", "")
@@ -451,15 +502,15 @@ async def _proxy_forward(
                 return StreamingResponse(
                     response.aiter_bytes(),
                     status_code=response.status_code,
-                    headers=dict(response.headers),
-                    media_type=response.headers.get("content-type"),
+                    headers=sanitized_headers,
+                    media_type=sanitized_headers.get("content-type"),
                 )
             else:
                 # Non-streaming response
-                return JSONResponse(
-                    content=response.json() if response.text else {},
+                return Response(
+                    content=response.content,
                     status_code=response.status_code,
-                    headers=dict(response.headers),
+                    headers=sanitized_headers,
                 )
 
     except httpx.TimeoutException:

@@ -50,5 +50,9 @@
   "deepseek-ocr": {
     "source": "local",
     "device": "gpu"
+  },
+  "glm-ocr": {
+    "source": "local",
+    "device": "gpu"
   }
 }
