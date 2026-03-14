@@ -3,12 +3,16 @@ import time
 import os
 import json
 import hashlib
+import logging
+from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 
 import requests
 
 from config import settings
 from llm_server import llm_server_up
+
+logger = logging.getLogger(__name__)
 
 # Kuinka kauan cache on voimassa (sekunteina)
 _CACHE_TTL = 300.0  # 5 min
@@ -69,6 +73,104 @@ def _fetch_from_ollama() -> Optional[List[Dict[str, Any]]]:
         return data.get("models", [])
     except Exception:
         return None
+
+
+def _invalidate_model_meta_cache() -> None:
+    """Tyhjennä model_meta-välimuisti niin että seuraava _load_meta() lukee tiedostosta."""
+    global _model_meta_cache
+    _model_meta_cache = None
+
+
+def sync_model_meta_with_ollama() -> bool:
+    """
+    Synkronoi model_meta.json Live Ollama-mallien kanssa.
+    
+    Strategia:
+      1. Hae live-mallit Ollamalta
+      2. Lataa nykyinen model_meta.json
+      3. Yhdistä: säilytä olemassa oleva metatyöntö, lisää uudet mallit oletuksilla
+      4. Merkitse poistetut mallit: "available": false
+      5. Kirjoita atomisch (temp-tiedosto -> rename)
+    
+    Returns:
+        True jos synkronointi onnistui, False jos virhe
+    """
+    try:
+        # 1) Hae live-mallit Ollamalta
+        live_models = _fetch_from_ollama()
+        if live_models is None:
+            logger.warning("Ollama eivät ole saatavilla - mallin meta-synkronointia ei voi tehdä.")
+            return False
+        
+        live_model_names = set()
+        for model in live_models:
+            name = model.get("name")
+            if name:
+                live_model_names.add(name)
+        
+        # 2) Lataa nykyinen model_meta.json
+        existing_meta: Dict[str, Dict[str, Any]] = {}
+        meta_path = Path(_MODEL_META_FILE)
+        if meta_path.exists():
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    existing_meta = json.load(f)
+                    if not isinstance(existing_meta, dict):
+                        existing_meta = {}
+            except Exception as e:
+                logger.warning(f"Nykyisen model_meta.json lukeminen epäonnistui: {e}")
+                existing_meta = {}
+        
+        # 3 & 4) Yhdistä ja päivitä
+        merged: Dict[str, Dict[str, Any]] = {}
+        
+        # Säilytä ja päivitä olemassa olevat + lisää uudet
+        for model_name in live_model_names:
+            if model_name in existing_meta:
+                # Säilytä olemassa oleva, mutta merkitse saatavilla
+                merged[model_name] = existing_meta[model_name].copy()
+                merged[model_name]["available"] = True
+            else:
+                # Uusi malli - lisää oletuksella
+                merged[model_name] = {
+                    "source": "local",
+                    "device": "gpu",
+                    "available": True,
+                }
+            logger.debug(f"Malli '{model_name}' synkronoitu (available: true)")
+        
+        # Merkitse poistetut mallit
+        for model_name in existing_meta:
+            if model_name not in live_model_names:
+                merged[model_name] = existing_meta[model_name].copy()
+                merged[model_name]["available"] = False
+                logger.debug(f"Malli '{model_name}' merkitty poistetuksi (available: false)")
+        
+        # 5) Atomisch kirjoitus: temp-tiedosto -> rename
+        meta_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = meta_path.with_suffix(".tmp")
+        
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(merged, f, indent=2, ensure_ascii=False)
+        
+        # Atominen rename
+        tmp_path.replace(meta_path)
+        
+        # Tyhjennä välimuisti niin että seuraava _load_meta() lukee päivitetyn tiedoston
+        _invalidate_model_meta_cache()
+        
+        new_count = len(live_model_names)
+        removed_count = sum(1 for m in merged.values() if not m.get("available", True))
+        logger.info(
+            f"model_meta.json synkronoitu: {new_count} mallia käytettävissä, "
+            f"{removed_count} merkitty poistetuksi"
+        )
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"model_meta.json synkronointiin virhe: {e}", exc_info=True)
+        return False
 
 
 def _get_raw_models() -> List[Dict[str, Any]]:

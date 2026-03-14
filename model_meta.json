@@ -1,58 +1,88 @@
 {
-  "qwen3-vl:32b ": {
+  "llama3.2:latest": {
     "source": "local",
-    "device": "gpu"
+    "device": "gpu",
+    "available": true
   },
-  "qwen3-vl:8b": {
+  "glm-ocr:latest": {
     "source": "local",
-    "device": "gpu"
+    "device": "gpu",
+    "available": true
+  },
+  "qwen3coder-32k:latest": {
+    "source": "local",
+    "device": "gpu",
+    "available": true
   },
   "qwen3-vl:235b-cloud": {
     "source": "cloud",
-    "device": "cloud"
-  },
-  "qwen3-coder:30b": {
-    "source": "local",
-    "device": "gpu"
+    "device": "cloud",
+    "available": true
   },
   "qwen2.5-coder:3b": {
     "source": "local",
-    "device": "gpu"
+    "device": "gpu",
+    "available": true
   },
-  "deepseek-coder-v2:16b": {
+  "qwen3coder-128k:latest": {
     "source": "local",
-    "device": "gpu"
-  },
-  "deepseek-r1:8b": {
-    "source": "local",
-    "device": "gpu"
-  },
-  "deepseek-r1:32b": {
-    "source": "local",
-    "device": "gpu"
-  },
-  "deepseek-coder:6.7b": {
-    "source": "local",
-    "device": "gpu"
-  },
-  "deepseek-coder:1.3b": {
-    "source": "local",
-    "device": "gpu"
-  },
-  "llama3.2:latest": {
-    "source": "local",
-    "device": "gpu"
+    "device": "cpu",
+    "available": true
   },
   "nomic-embed-text:latest": {
     "source": "local",
-    "device": "gpu"
+    "device": "gpu",
+    "available": true
   },
-  "deepseek-ocr": {
+  "deepseek-coder:1.3b": {
     "source": "local",
-    "device": "gpu"
+    "device": "gpu",
+    "available": true
   },
-  "glm-ocr": {
+  "qwen3-vl:8b": {
     "source": "local",
-    "device": "gpu"
+    "device": "gpu",
+    "available": true
+  },
+  "qwen3-coder:30b": {
+    "source": "local",
+    "device": "gpu",
+    "available": true
+  },
+  "deepseek-r1:8b": {
+    "source": "local",
+    "device": "gpu",
+    "available": true
+  },
+  "deepseek-coder-v2:16b": {
+    "source": "local",
+    "device": "gpu",
+    "available": true
+  },
+  "deepseek-ocr:latest": {
+    "source": "local",
+    "device": "gpu",
+    "available": true
+  },
+  "qwen3-vl:32b": {
+    "source": "local",
+    "device": "gpu",
+    "available": true
+  },
+  "Qwen3-coder:30b": {
+    "source": "local",
+    "device": "gpu",
+    "available": true
+  },
+  "deepseek-r1:32b": {
+    "source": "local",
+    "device": "gpu",
+    "available": true
+  },
+  "deepseek-coder:6.7b": {
+    "source": "local",
+    "device": "gpu",
+    "available": true
   }
+
 }

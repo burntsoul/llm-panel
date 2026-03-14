@@ -20697,3 +20697,76 @@ teemu@192.168.8.33: Permission denied (publickey,password).
 2026-03-14 15:15:21,390 INFO gpu_watchdog: GPU watchdog leaving failsafe mode (telemetry healthy)
 2026-03-14 15:15:21,391 INFO ilo_fan: Executing iLO fan command: fan p 3 min 30
 2026-03-14 15:15:23,765 INFO gpu_watchdog: GPU watchdog mode transition: failsafe -> auto
+2026-03-14 15:58:30,584 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-03-14 15:58:33,909 INFO ilo_fan: Executing iLO fan command: fan p 3 min 50
+2026-03-14 15:58:36,184 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 15:58:36,423 INFO gpu_watchdog: GPU watchdog mode transition: auto -> vm_off_idle
+2026-03-14 15:58:38,698 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 15:58:41,211 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 15:58:43,725 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 15:58:46,235 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 15:58:48,747 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 15:59:42,712 INFO gpu_watchdog: GPU watchdog loop stopped
+2026-03-14 15:59:44,185 INFO gpu_watchdog: GPU watchdog loop started
+2026-03-14 15:59:49,932 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 15:59:50,512 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 113] No route to host"))
+2026-03-14 15:59:54,186 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 15:59:54,736 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 113] No route to host"))
+2026-03-14 15:59:58,171 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 15:59:58,261 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 113] No route to host"))
+2026-03-14 16:00:01,585 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 113] No route to host"))
+2026-03-14 16:00:05,169 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 16:00:05,744 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 113] No route to host"))
+2026-03-14 16:00:09,265 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 113] No route to host"))
+2026-03-14 16:00:11,777 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 16:00:12,340 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 113] No route to host"))
+2026-03-14 16:00:15,176 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 16:00:15,729 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 113] No route to host"))
+2026-03-14 16:00:20,175 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 16:00:20,272 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 113] No route to host"))
+2026-03-14 16:00:25,176 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 16:00:25,776 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 113] No route to host"))
+2026-03-14 16:00:30,181 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 16:00:30,768 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 113] No route to host"))
+2026-03-14 16:00:34,171 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 16:00:34,736 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 113] No route to host"))
+2026-03-14 16:00:38,170 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 16:00:38,771 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 113] No route to host"))
+2026-03-14 16:00:42,096 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 113] No route to host"))
+2026-03-14 16:00:44,938 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 16:00:48,000 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 16:00:48,564 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 113] No route to host"))
+2026-03-14 16:00:51,075 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 16:00:51,177 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 16:00:51,632 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 113] No route to host"))
+2026-03-14 16:00:55,177 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 16:00:55,730 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 113] No route to host"))
+2026-03-14 16:00:59,192 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 16:00:59,763 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 113] No route to host"))
+2026-03-14 16:01:03,197 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 16:01:03,792 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 113] No route to host"))
+2026-03-14 16:01:06,865 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 113] No route to host"))
+2026-03-14 16:01:11,152 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 113] No route to host"))
+2026-03-14 16:01:13,666 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 16:01:14,225 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 113] No route to host"))
+2026-03-14 16:01:16,739 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 16:01:17,296 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 113] No route to host"))
+2026-03-14 16:01:21,191 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 16:01:21,649 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 113] No route to host"))
+2026-03-14 16:01:26,193 WARNING gpu_telemetry: GPU telemetry timeout from remote Glances
+2026-03-14 16:01:26,320 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 113] No route to host"))
+2026-03-14 16:01:29,712 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 113] No route to host"))
+2026-03-14 16:01:30,737 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-03-14 16:01:32,683 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-03-14 16:01:33,689 WARNING gpu_telemetry: GPU telemetry fetch failed: HTTPConnectionPool(host='192.168.8.33', port=61208): Max retries exceeded with url: /api/4/gpu (Caused by NewConnectionError("HTTPConnection(host='192.168.8.33', port=61208): Failed to establish a new connection: [Errno 111] Connection refused"))
+2026-03-14 16:01:39,706 INFO models: model_meta.json synkronoitu: 17 mallia käytettävissä, 3 merkitty poistetuksi
+2026-03-14 16:01:45,502 INFO lease: Loaded 0 leases from disk
+2026-03-14 16:28:51,108 INFO llm-agent: completions: translated embedded FIM tokens into {prompt,suffix} (suffix_len=413)
+2026-03-14 16:28:51,108 INFO llm-agent: completions request model=qwen2.5-coder:3b stream=True prompt_len=1847 suffix_len=413 max_tokens=128 fim=True
+2026-03-14 16:29:01,542 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/completions "HTTP/1.1 200 OK"
+2026-03-14 16:29:30,204 INFO llm-agent: completions: translated embedded FIM tokens into {prompt,suffix} (suffix_len=2)
+2026-03-14 16:29:30,205 INFO llm-agent: completions request model=qwen2.5-coder:3b stream=True prompt_len=2261 suffix_len=2 max_tokens=128 fim=True
+2026-03-14 16:29:31,113 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/completions "HTTP/1.1 200 OK"
+2026-03-14 16:29:36,169 INFO llm-agent: completions: translated embedded FIM tokens into {prompt,suffix} (suffix_len=3)
+2026-03-14 16:29:36,169 INFO llm-agent: completions request model=qwen2.5-coder:3b stream=True prompt_len=2259 suffix_len=3 max_tokens=128 fim=True
+2026-03-14 16:29:37,005 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/completions "HTTP/1.1 200 OK"

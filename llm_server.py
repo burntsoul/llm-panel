@@ -14,6 +14,7 @@ from state import get_maintenance_mode
 
 
 _last_activity = datetime.datetime.utcnow()
+_ollama_was_up = False  # Track Ollama state transitions for auto-sync
 
 
 def touch_activity() -> None:
@@ -24,6 +25,26 @@ def touch_activity() -> None:
 
 def get_last_activity() -> datetime.datetime:
     return _last_activity
+
+
+def detect_ollama_online_transition() -> bool:
+    """
+    Tarkista, siirtymä Ollama olemaan online (offline -> online).
+    Käytä model_meta.json synkronointiin.
+    
+    Returns:
+        True jos Ollama juuri meni online (siirtymä offline->online), False muuten
+    """
+    global _ollama_was_up
+    current_state = llm_server_up()
+    
+    if not _ollama_was_up and current_state:
+        # Siirtymä: False -> True (offline -> online)
+        _ollama_was_up = True
+        return True
+    
+    _ollama_was_up = current_state
+    return False
 
 
 def llm_server_up() -> bool:
@@ -118,6 +139,15 @@ def ensure_llm_running_with_reason() -> Tuple[bool, str]:
     - Jos EXCLUSIVE_VMS on päällä ja Windows-VM on käynnissä, ei käynnistä.
     """
     if llm_server_up():
+        # Ollama on jo käynnissä - tarkista onko se juuri tullut online (siirtymä)
+        if detect_ollama_online_transition():
+            # Ollama juuri meni online - synkronoi model_meta.json
+            try:
+                from models import sync_model_meta_with_ollama
+                sync_model_meta_with_ollama()
+            except Exception:
+                # Ei pysäytä operaatiota jos sync epäonnistuu
+                pass
         return True, "Ollama on jo käynnissä."
 
     # GPU-exclusivity
@@ -145,6 +175,14 @@ def ensure_llm_running_with_reason() -> Tuple[bool, str]:
     while time.time() < deadline:
         if llm_server_up():
             touch_activity()
+            # Ollama juuri tuli online - synkronoi model_meta.json
+            if detect_ollama_online_transition():
+                try:
+                    from models import sync_model_meta_with_ollama
+                    sync_model_meta_with_ollama()
+                except Exception:
+                    # Ei pysäytä operaatiota jos sync epäonnistuu
+                    pass
             return True, "LLM on käynnissä ja valmis."
         time.sleep(settings.LLM_POLL_INTERVAL)
 
