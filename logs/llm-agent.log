@@ -23850,3 +23850,199 @@ teemu@192.168.8.33: Permission denied (publickey,password).
 2026-03-16 16:27:39,191 INFO llm-agent: chat_completions request model=qwen3coder-128k:latest stream=True messages=2 max_tokens=None
 2026-03-16 16:27:39,228 INFO models: model_meta.json synkronoitu: 14 mallia käytettävissä, 4 merkitty poistetuksi
 2026-03-16 16:28:25,772 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 16:28:40,702 INFO llm-agent: chat_completions request model=qwen3coder-128k:latest stream=True messages=4 max_tokens=None
+2026-03-16 16:28:45,281 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 16:28:52,252 INFO llm-agent: chat_completions request model=qwen3coder-128k:latest stream=True messages=6 max_tokens=None
+2026-03-16 16:31:01,378 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 16:31:22,336 INFO llm-agent: chat_completions request model=qwen3coder-128k:latest stream=True messages=8 max_tokens=None
+2026-03-16 16:31:43,067 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 16:32:01,445 INFO llm-agent: chat_completions request model=qwen3coder-128k:latest stream=True messages=10 max_tokens=None
+2026-03-16 16:32:47,246 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 16:33:06,687 INFO llm-agent: chat_completions request model=qwen3coder-128k:latest stream=True messages=12 max_tokens=None
+2026-03-16 16:34:02,207 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 16:37:48,172 INFO llm-agent: chat_completions request model=qwen3coder-128k:latest stream=True messages=14 max_tokens=None
+2026-03-16 16:37:58,917 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 16:42:25,166 INFO llm-agent: chat_completions request model=qwen3coder-128k:latest stream=True messages=16 max_tokens=None
+2026-03-16 16:43:06,958 INFO gpu_watchdog: GPU watchdog enabled=True
+2026-03-16 16:43:12,244 INFO ilo_fan: Executing iLO fan command: fan p 3 min 230
+2026-03-16 16:43:13,649 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 16:43:14,779 INFO gpu_watchdog: GPU watchdog mode transition: disabled -> auto
+2026-03-16 16:43:37,499 INFO ilo_fan: Executing iLO fan command: fan p 3 min 150
+2026-03-16 16:44:08,765 INFO ilo_fan: Executing iLO fan command: fan p 3 min 90
+2026-03-16 16:44:34,904 INFO ilo_fan: Executing iLO fan command: fan p 3 min 40
+2026-03-16 16:46:05,615 INFO llm-agent: chat_completions request model=qwen3coder-128k:latest stream=True messages=18 max_tokens=None
+2026-03-16 16:46:09,507 INFO ilo_fan: Executing iLO fan command: fan p 3 min 90
+2026-03-16 16:46:34,314 INFO ilo_fan: Executing iLO fan command: fan p 3 min 150
+2026-03-16 16:46:59,310 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 16:47:10,711 INFO ilo_fan: Executing iLO fan command: fan p 3 min 90
+2026-03-16 16:47:36,460 INFO ilo_fan: Executing iLO fan command: fan p 3 min 40
+2026-03-16 16:48:39,230 INFO llm-agent: chat_completions request model=qwen3coder-128k:latest stream=True messages=20 max_tokens=None
+2026-03-16 16:48:47,230 INFO ilo_fan: Executing iLO fan command: fan p 3 min 90
+2026-03-16 16:49:12,256 INFO ilo_fan: Executing iLO fan command: fan p 3 min 150
+2026-03-16 16:53:28,613 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 16:53:44,523 INFO ilo_fan: Executing iLO fan command: fan p 3 min 90
+2026-03-16 16:54:10,005 INFO ilo_fan: Executing iLO fan command: fan p 3 min 40
+2026-03-16 16:55:50,037 INFO llm-agent: chat_completions request model=qwen3coder-128k:latest stream=True messages=22 max_tokens=None
+2026-03-16 16:56:06,004 INFO ilo_fan: Executing iLO fan command: fan p 3 min 90
+2026-03-16 16:56:30,783 INFO ilo_fan: Executing iLO fan command: fan p 3 min 150
+2026-03-16 16:56:54,619 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 16:57:06,944 INFO ilo_fan: Executing iLO fan command: fan p 3 min 90
+2026-03-16 16:57:37,721 INFO ilo_fan: Executing iLO fan command: fan p 3 min 40
+2026-03-16 17:05:37,333 INFO llm-agent: chat_completions request model=qwen3coder-128k:latest stream=True messages=24 max_tokens=None
+2026-03-16 17:05:46,355 INFO ilo_fan: Executing iLO fan command: fan p 3 min 90
+2026-03-16 17:06:11,380 INFO ilo_fan: Executing iLO fan command: fan p 3 min 150
+2026-03-16 17:10:41,178 INFO llm-agent: chat_completions request model=qwen3coder-128k:latest stream=True messages=24 max_tokens=None
+2026-03-16 17:12:09,184 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 17:12:23,530 INFO ilo_fan: Executing iLO fan command: fan p 3 min 90
+2026-03-16 17:12:49,281 INFO ilo_fan: Executing iLO fan command: fan p 3 min 40
+2026-03-16 17:27:08,354 INFO llm-agent: chat_completions request model=qwen3coder-128k:latest stream=True messages=26 max_tokens=None
+2026-03-16 17:27:13,849 INFO ilo_fan: Executing iLO fan command: fan p 3 min 90
+2026-03-16 17:27:38,852 INFO ilo_fan: Executing iLO fan command: fan p 3 min 150
+2026-03-16 17:32:12,317 INFO llm-agent: chat_completions request model=qwen3coder-128k:latest stream=True messages=16 max_tokens=None
+2026-03-16 17:37:03,395 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 17:37:14,678 INFO ilo_fan: Executing iLO fan command: fan p 3 min 90
+2026-03-16 17:37:39,930 INFO ilo_fan: Executing iLO fan command: fan p 3 min 40
+2026-03-16 17:38:51,679 INFO llm-agent: chat_completions request model=qwen3coder-128k:latest stream=True messages=18 max_tokens=None
+2026-03-16 17:38:59,856 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 17:47:29,963 INFO llm-agent: chat_completions request model=qwen3coder-128k:latest stream=True messages=20 max_tokens=None
+2026-03-16 17:47:35,440 INFO ilo_fan: Executing iLO fan command: fan p 3 min 90
+2026-03-16 17:48:00,364 INFO ilo_fan: Executing iLO fan command: fan p 3 min 150
+2026-03-16 17:52:00,720 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 17:52:15,164 INFO ilo_fan: Executing iLO fan command: fan p 3 min 90
+2026-03-16 17:52:46,210 INFO ilo_fan: Executing iLO fan command: fan p 3 min 40
+2026-03-16 18:03:13,594 INFO llm-agent: chat_completions request model=qwen3coder-128k:latest stream=True messages=22 max_tokens=None
+2026-03-16 18:03:23,237 INFO ilo_fan: Executing iLO fan command: fan p 3 min 90
+2026-03-16 18:03:47,876 INFO ilo_fan: Executing iLO fan command: fan p 3 min 150
+2026-03-16 18:08:17,747 INFO llm-agent: chat_completions request model=qwen3coder-128k:latest stream=True messages=22 max_tokens=None
+2026-03-16 18:09:12,331 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 18:09:26,430 INFO ilo_fan: Executing iLO fan command: fan p 3 min 90
+2026-03-16 18:09:51,981 INFO ilo_fan: Executing iLO fan command: fan p 3 min 40
+2026-03-16 18:20:08,211 INFO llm-agent: chat_completions request model=qwen3coder-128k:latest stream=True messages=24 max_tokens=None
+2026-03-16 18:20:17,014 INFO ilo_fan: Executing iLO fan command: fan p 3 min 90
+2026-03-16 18:20:41,775 INFO ilo_fan: Executing iLO fan command: fan p 3 min 150
+2026-03-16 18:24:23,110 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 18:24:34,485 INFO ilo_fan: Executing iLO fan command: fan p 3 min 90
+2026-03-16 18:25:00,044 INFO ilo_fan: Executing iLO fan command: fan p 3 min 40
+2026-03-16 18:30:28,297 INFO llm-agent: chat_completions request model=qwen3coder-128k:latest stream=True messages=26 max_tokens=None
+2026-03-16 18:30:38,568 INFO ilo_fan: Executing iLO fan command: fan p 3 min 90
+2026-03-16 18:31:03,881 INFO ilo_fan: Executing iLO fan command: fan p 3 min 150
+2026-03-16 18:35:12,215 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 18:35:24,492 INFO ilo_fan: Executing iLO fan command: fan p 3 min 90
+2026-03-16 18:35:55,144 INFO ilo_fan: Executing iLO fan command: fan p 3 min 40
+2026-03-16 18:37:31,714 INFO llm-agent: chat_completions request model=qwen3coder-128k:latest stream=True messages=28 max_tokens=None
+2026-03-16 18:37:36,585 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 18:42:55,732 INFO gpu_watchdog: GPU watchdog loop started
+2026-03-16 18:43:27,962 INFO gpu_watchdog: GPU watchdog enabled=True
+2026-03-16 18:43:31,335 INFO ilo_fan: Executing iLO fan command: fan p 3 min 40
+2026-03-16 18:43:33,781 INFO gpu_watchdog: GPU watchdog mode transition: disabled -> auto
+2026-03-16 18:43:56,020 INFO lease: Loaded 0 leases from disk
+2026-03-16 18:44:44,642 INFO llm-agent: chat_completions request model=qwen3coder-128k:latest stream=True messages=2 max_tokens=4096
+2026-03-16 18:44:44,679 INFO models: model_meta.json synkronoitu: 14 mallia käytettävissä, 0 merkitty poistetuksi
+2026-03-16 18:46:10,806 INFO llm-agent: chat_completions request model=qwen3coder-32k:latest stream=True messages=2 max_tokens=2048
+2026-03-16 18:46:30,261 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 18:46:34,363 INFO llm-agent: chat_completions request model=qwen3coder-32k:latest stream=True messages=1 max_tokens=16
+2026-03-16 18:46:35,229 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 18:49:46,679 INFO llm-agent: completions: translated embedded FIM tokens into {prompt,suffix} (suffix_len=434)
+2026-03-16 18:49:46,685 INFO llm-agent: completions request model=qwen2.5-coder:3b stream=True prompt_len=2092 suffix_len=434 max_tokens=128 fim=True
+2026-03-16 18:49:53,948 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/completions "HTTP/1.1 200 OK"
+2026-03-16 18:49:59,594 INFO llm-agent: completions: translated embedded FIM tokens into {prompt,suffix} (suffix_len=427)
+2026-03-16 18:49:59,595 INFO llm-agent: completions request model=qwen2.5-coder:3b stream=True prompt_len=2097 suffix_len=427 max_tokens=128 fim=True
+2026-03-16 18:50:00,518 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/completions "HTTP/1.1 200 OK"
+2026-03-16 18:50:02,511 INFO ilo_fan: Executing iLO fan command: fan p 3 min 90
+2026-03-16 18:50:12,622 INFO llm-agent: completions: translated embedded FIM tokens into {prompt,suffix} (suffix_len=430)
+2026-03-16 18:50:12,623 INFO llm-agent: completions request model=qwen2.5-coder:3b stream=True prompt_len=2088 suffix_len=430 max_tokens=128 fim=True
+2026-03-16 18:50:13,727 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/completions "HTTP/1.1 200 OK"
+2026-03-16 18:50:39,256 INFO ilo_fan: Executing iLO fan command: fan p 3 min 40
+2026-03-16 18:51:57,909 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=2 max_tokens=4096
+2026-03-16 18:51:57,986 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 404 Not Found"
+2026-03-16 18:52:05,871 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=2 max_tokens=4096
+2026-03-16 18:52:24,364 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 18:52:46,617 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=4 max_tokens=4096
+2026-03-16 18:53:15,001 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 18:53:29,481 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=6 max_tokens=4096
+2026-03-16 18:53:46,535 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 18:54:00,768 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=8 max_tokens=4096
+2026-03-16 18:54:00,861 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 404 Not Found"
+2026-03-16 18:54:03,482 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=8 max_tokens=4096
+2026-03-16 18:54:32,430 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 18:54:42,854 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=10 max_tokens=4096
+2026-03-16 18:54:42,956 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 404 Not Found"
+2026-03-16 18:54:46,550 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=10 max_tokens=4096
+2026-03-16 18:54:46,622 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 404 Not Found"
+2026-03-16 18:54:51,092 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=10 max_tokens=4096
+2026-03-16 18:55:13,388 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 18:55:37,072 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=12 max_tokens=4096
+2026-03-16 18:55:38,725 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 18:55:50,395 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=14 max_tokens=4096
+2026-03-16 18:56:03,369 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 18:56:15,114 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=16 max_tokens=4096
+2026-03-16 18:56:15,191 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 404 Not Found"
+2026-03-16 18:56:18,814 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=16 max_tokens=4096
+2026-03-16 18:56:19,144 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 404 Not Found"
+2026-03-16 18:56:23,128 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=16 max_tokens=4096
+2026-03-16 18:56:23,273 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 404 Not Found"
+2026-03-16 18:56:28,300 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=16 max_tokens=4096
+2026-03-16 18:56:29,751 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 18:56:36,669 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=18 max_tokens=4096
+2026-03-16 18:56:49,629 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 18:57:12,029 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=20 max_tokens=4096
+2026-03-16 18:57:18,638 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 18:57:34,136 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=22 max_tokens=4096
+2026-03-16 18:57:34,301 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 404 Not Found"
+2026-03-16 18:57:41,387 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=22 max_tokens=4096
+2026-03-16 18:57:45,269 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 18:58:05,471 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=24 max_tokens=4096
+2026-03-16 18:58:11,023 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 18:58:36,321 INFO ilo_fan: Executing iLO fan command: fan p 3 min 30
+2026-03-16 18:59:15,906 INFO llm-agent: completions: translated embedded FIM tokens into {prompt,suffix} (suffix_len=407)
+2026-03-16 18:59:15,907 INFO llm-agent: completions request model=qwen2.5-coder:3b stream=True prompt_len=2150 suffix_len=407 max_tokens=128 fim=True
+2026-03-16 18:59:20,089 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/completions "HTTP/1.1 200 OK"
+2026-03-16 18:59:29,276 INFO llm-agent: completions: translated embedded FIM tokens into {prompt,suffix} (suffix_len=403)
+2026-03-16 18:59:29,277 INFO llm-agent: completions request model=qwen2.5-coder:3b stream=True prompt_len=2148 suffix_len=403 max_tokens=128 fim=True
+2026-03-16 18:59:30,676 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/completions "HTTP/1.1 200 OK"
+2026-03-16 18:59:33,132 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=26 max_tokens=4096
+2026-03-16 18:59:38,694 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 19:00:13,702 INFO llm-agent: completions: translated embedded FIM tokens into {prompt,suffix} (suffix_len=428)
+2026-03-16 19:00:13,702 INFO llm-agent: completions request model=qwen2.5-coder:3b stream=True prompt_len=2116 suffix_len=428 max_tokens=128 fim=True
+2026-03-16 19:00:14,725 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/completions "HTTP/1.1 200 OK"
+2026-03-16 19:00:15,956 INFO ilo_fan: Executing iLO fan command: fan p 3 min 40
+2026-03-16 19:00:31,883 INFO llm-agent: completions: translated embedded FIM tokens into {prompt,suffix} (suffix_len=420)
+2026-03-16 19:00:31,883 INFO llm-agent: completions request model=qwen2.5-coder:3b stream=True prompt_len=2132 suffix_len=420 max_tokens=128 fim=True
+2026-03-16 19:00:32,855 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/completions "HTTP/1.1 200 OK"
+2026-03-16 19:00:47,064 INFO llm-agent: completions: translated embedded FIM tokens into {prompt,suffix} (suffix_len=441)
+2026-03-16 19:00:47,066 INFO llm-agent: completions request model=qwen2.5-coder:3b stream=True prompt_len=2096 suffix_len=441 max_tokens=128 fim=True
+2026-03-16 19:00:48,192 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/completions "HTTP/1.1 200 OK"
+2026-03-16 19:00:54,004 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=28 max_tokens=4096
+2026-03-16 19:00:55,863 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 19:01:12,011 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=30 max_tokens=4096
+2026-03-16 19:01:13,891 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 19:01:40,625 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=32 max_tokens=4096
+2026-03-16 19:01:40,703 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 404 Not Found"
+2026-03-16 19:01:49,299 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=32 max_tokens=4096
+2026-03-16 19:01:49,436 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 404 Not Found"
+2026-03-16 19:01:56,982 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=32 max_tokens=4096
+2026-03-16 19:02:02,933 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 19:02:32,853 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=34 max_tokens=4096
+2026-03-16 19:02:32,984 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 404 Not Found"
+2026-03-16 19:02:40,341 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=34 max_tokens=4096
+2026-03-16 19:02:40,496 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 404 Not Found"
+2026-03-16 19:02:48,152 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=34 max_tokens=4096
+2026-03-16 19:03:01,523 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 19:03:24,606 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=36 max_tokens=4096
+2026-03-16 19:03:35,740 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 19:04:13,340 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=38 max_tokens=4096
+2026-03-16 19:04:13,433 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 404 Not Found"
+2026-03-16 19:04:21,481 INFO llm-agent: chat_completions request model=qwen3-coder:480b-cloud stream=True messages=38 max_tokens=4096
+2026-03-16 19:04:23,970 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 19:06:45,174 INFO llm-agent: completions: translated embedded FIM tokens into {prompt,suffix} (suffix_len=28)
+2026-03-16 19:06:45,175 INFO llm-agent: completions request model=qwen3coder-32k:latest stream=True prompt_len=28 suffix_len=28 max_tokens=4096 fim=True
+2026-03-16 19:06:45,612 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/completions "HTTP/1.1 400 Bad Request"
+2026-03-16 19:08:20,797 INFO ilo_fan: Executing iLO fan command: fan p 3 min 30
+2026-03-16 19:12:12,477 INFO llm-agent: chat_completions request model=Qwen3-coder:480b-cloud stream=True messages=2 max_tokens=None
+2026-03-16 19:12:13,665 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-03-16 19:13:06,913 INFO llm-agent: chat_completions request model=Qwen3-coder:480b-cloud stream=True messages=4 max_tokens=None
+2026-03-16 19:13:07,110 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 404 Not Found"
+2026-03-16 19:13:09,308 INFO llm-agent: chat_completions request model=Qwen3-coder:480b-cloud stream=True messages=6 max_tokens=None
+2026-03-16 19:13:09,491 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 404 Not Found"
+2026-03-16 19:13:13,732 INFO llm-agent: chat_completions request model=Qwen3-coder:480b-cloud stream=True messages=8 max_tokens=None
+2026-03-16 19:13:13,892 INFO httpx: HTTP Request: POST http://192.168.8.33:11434/v1/chat/completions "HTTP/1.1 404 Not Found"

@@ -150,6 +150,7 @@ class Settings:
 
         # -------- LLM-palvelin (Ollama) --------
         self.LLM_PORT = _env_int("LLM_PORT", 11434)
+        self.LLM_CPU_PORT = _env_int("LLM_CPU_PORT", 11435)
 
         # Glances-API llm-serverillä
         self.GLANCES_API_BASE = (

@@ -13,6 +13,10 @@ models:
       - chat
       - edit
       - apply
+    defaultCompletionOptions:
+      contextLength: 32768
+      maxTokens: 2048
+      temperature: 0.2
 
   - name: Qwen Coder 128k
     provider: openai
@@ -24,6 +28,22 @@ models:
       - chat
       - edit
       - apply
+
+  - name: qwen3-coder:480b-cloud
+    provider: openai
+    apiBase: http://192.168.8.36:8000/v1
+    model: qwen3-coder:480b-cloud 
+    capabilities:
+      - tool_use
+    roles:
+      - chat
+      - edit
+      - apply
+    defaultCompletionOptions:
+      contextLength: 256000
+      maxTokens: 4096
+      temperature: 0.2
+
 
 # (valinnainen mutta suositeltava) embeddings codebase-hakuun
   - name: Embeddings via llm-agent

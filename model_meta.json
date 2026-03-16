@@ -4,12 +4,52 @@
     "device": "gpu",
     "available": true
   },
+  "qwen3coder-32k:latest": {
+    "source": "local",
+    "device": "gpu",
+    "available": true
+  },
+  "deepseek-ocr:latest": {
+    "source": "local",
+    "device": "gpu",
+    "available": true
+  },
+  "qwen2.5-coder:3b": {
+    "source": "local",
+    "device": "gpu",
+    "available": true
+  },
+  "qwen3-coder:30b": {
+    "source": "local",
+    "device": "gpu",
+    "available": true
+  },
   "deepseek-coder-v2:16b": {
     "source": "local",
     "device": "gpu",
     "available": true
   },
-  "Qwen3-coder:30b": {
+  "qwen3coder-128k:latest": {
+    "source": "local",
+    "device": "cpu",
+    "available": true
+  },
+  "qwen3-vl:32b": {
+    "source": "local",
+    "device": "gpu",
+    "available": true
+  },
+  "deepseek-r1:32b": {
+    "source": "local",
+    "device": "gpu",
+    "available": true
+  },
+  "qwen3-vl:235b-cloud": {
+    "source": "cloud",
+    "device": "cloud",
+    "available": true
+  },
+  "qwen3-vl:8b": {
     "source": "local",
     "device": "gpu",
     "available": true
@@ -24,69 +64,9 @@
     "device": "gpu",
     "available": true
   },
-  "deepseek-ocr:latest": {
+  "Qwen3-coder:30b": {
     "source": "local",
     "device": "gpu",
     "available": true
-  },
-  "qwen3-coder:30b": {
-    "source": "local",
-    "device": "gpu",
-    "available": true
-  },
-  "qwen3-vl:8b": {
-    "source": "local",
-    "device": "gpu",
-    "available": true
-  },
-  "qwen3coder-128k:latest": {
-    "source": "local",
-    "device": "cpu",
-    "available": true
-  },
-  "qwen3-vl:235b-cloud": {
-    "source": "cloud",
-    "device": "cloud",
-    "available": true
-  },
-  "qwen3coder-32k:latest": {
-    "source": "local",
-    "device": "gpu",
-    "available": true
-  },
-  "qwen3-vl:32b": {
-    "source": "local",
-    "device": "gpu",
-    "available": true
-  },
-  "deepseek-r1:32b": {
-    "source": "local",
-    "device": "gpu",
-    "available": true
-  },
-  "qwen2.5-coder:3b": {
-    "source": "local",
-    "device": "gpu",
-    "available": true
-  },
-  "deepseek-coder:1.3b": {
-    "source": "local",
-    "device": "gpu",
-    "available": false
-  },
-  "llama3.2:latest": {
-    "source": "local",
-    "device": "gpu",
-    "available": false
-  },
-  "deepseek-r1:8b": {
-    "source": "local",
-    "device": "gpu",
-    "available": false
-  },
-  "deepseek-coder:6.7b": {
-    "source": "local",
-    "device": "gpu",
-    "available": false
   }
 }

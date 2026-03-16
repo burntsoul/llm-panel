@@ -1,10 +1,12 @@
 # secrets & runtime state
-secrets.py
+llm_secrets.py
 state.json
 __pycache__/
 *.pyc
 .env
-llm_secrets.py
+
 
 # Local virtualenv
 .venv/
+logs/llm-agent.log
+model_meta.json
