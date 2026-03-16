@@ -998,7 +998,7 @@ def chat_stream(model: str = Form(...), prompt: str = Form(...)):
             "prompt": prompt,
             "stream": True
         }
-        with requests.post(url, json=payload, stream=True, timeout=1200) as r:
+        with requests.post(url, json=payload, stream=True, timeout=2400) as r:
             r.raise_for_status()
             for line in r.iter_lines():
                 if not line:
