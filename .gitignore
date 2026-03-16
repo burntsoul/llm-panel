@@ -10,3 +10,4 @@ __pycache__/
 .venv/
 logs/llm-agent.log
 model_meta.json
+logs/llm-agent.log
