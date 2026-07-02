@@ -1230,6 +1230,7 @@ def api_settings_effective():
             "gpu_telemetry": {
                 "title": "GPU telemetry",
                 "editable": gpu_telemetry_editable,
+                "advanced": True,
                 "save_endpoint": "/api/settings/gpu/telemetry",
                 "error": gpu_telemetry_error,
                 "fields": gpu_telemetry_fields,
@@ -1286,6 +1287,7 @@ async def api_settings_update_gpu_telemetry(request: Request):
         "section": {
             "title": "GPU telemetry",
             "editable": True,
+            "advanced": True,
             "save_endpoint": "/api/settings/gpu/telemetry",
             "fields": gpu_telemetry_fields_for_api(secrets_module=config_secrets),
         },

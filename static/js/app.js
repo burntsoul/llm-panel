@@ -38,6 +38,7 @@ let previousGpuTemp = null;
 let settingsData = null;
 let activeSettingsSection = "runtime";
 let settingsDirty = false;
+let settingsAdvanced = false;
 
 function getDefaultSubtab(tab) {
   const options = SUBTAB_OPTIONS[tab] || ["main"];
@@ -1054,14 +1055,19 @@ function formatSettingValue(field) {
 
 function renderSettingsSection(sectionId) {
   const sections = settingsData && settingsData.sections ? settingsData.sections : {};
+  if (!settingsAdvanced && sections[sectionId] && sections[sectionId].advanced) {
+    sectionId = "runtime";
+  }
   const section = sections[sectionId] || sections.runtime;
   if (!section) return;
+  const visibleFields = (section.fields || []).filter((field) => settingsAdvanced || !field.advanced);
 
   activeSettingsSection = sectionId;
   settingsDirty = false;
   setText("settings-section-title", section.title || "Settings");
   setSettingsSaveStatus(section.editable ? "No changes." : "Read-only branch.");
   updateSettingsSaveButton(section);
+  syncSettingsAdvancedVisibility();
 
   qsa("[data-settings-section]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.settingsSection === sectionId);
@@ -1079,7 +1085,7 @@ function renderSettingsSection(sectionId) {
       card.appendChild(message);
       grid.appendChild(card);
     }
-    (section.fields || []).forEach((field) => {
+    visibleFields.forEach((field) => {
       const card = document.createElement("div");
       card.className = "settings-field";
       const editable = !!section.editable && field.editable !== false;
@@ -1128,7 +1134,7 @@ function renderSettingsSection(sectionId) {
   const table = qs("#settings-effective-table");
   if (table) {
     table.innerHTML = "";
-    (section.fields || []).forEach((field) => {
+    visibleFields.forEach((field) => {
       const row = document.createElement("div");
       row.className = "settings-row";
       const key = document.createElement("span");
@@ -1140,6 +1146,32 @@ function renderSettingsSection(sectionId) {
       row.append(key, value, source);
       table.appendChild(row);
     });
+  }
+}
+
+function syncSettingsAdvancedVisibility() {
+  qsa("[data-advanced-only='true']").forEach((node) => {
+    node.classList.toggle("hidden", !settingsAdvanced);
+  });
+
+  const effectiveWrap = qs("#settings-effective-wrap");
+  if (effectiveWrap) {
+    effectiveWrap.classList.toggle("hidden", !settingsAdvanced);
+  }
+
+  const toggle = qs("#settings-advanced-toggle");
+  if (toggle) {
+    toggle.checked = settingsAdvanced;
+  }
+}
+
+function setSettingsAdvanced(enabled) {
+  settingsAdvanced = !!enabled;
+  syncSettingsAdvancedVisibility();
+
+  const currentSection = settingsData && settingsData.sections ? settingsData.sections[activeSettingsSection] : null;
+  if (!settingsAdvanced && currentSection && currentSection.advanced) {
+    renderSettingsSection("runtime");
   }
 }
 
@@ -1234,6 +1266,12 @@ function initSettings() {
   if (refreshBtn) {
     refreshBtn.addEventListener("click", () => loadSettings(activeSettingsSection));
   }
+
+  const advancedToggle = qs("#settings-advanced-toggle");
+  if (advancedToggle) {
+    advancedToggle.addEventListener("change", () => setSettingsAdvanced(advancedToggle.checked));
+  }
+  syncSettingsAdvancedVisibility();
 
   const saveBtn = qs("#settings-save-btn");
   if (saveBtn) {

@@ -414,11 +414,11 @@
               <button class="settings-tree-child" type="button" data-settings-section="proxmox">Connection</button>
               <button class="settings-tree-child" type="button" data-settings-section="proxmox">VM map</button>
               <button class="settings-tree-child" type="button" data-settings-section="proxmox">Power policy</button>
-              <button class="settings-tree-item" type="button" data-settings-section="gpu_telemetry">
+              <button class="settings-tree-item" type="button" data-settings-section="gpu">
                 <span class="tree-caret">▾</span>
                 GPU
               </button>
-              <button class="settings-tree-child" type="button" data-settings-section="gpu_telemetry">Telemetry</button>
+              <button class="settings-tree-child" type="button" data-settings-section="gpu_telemetry" data-advanced-only="true">Telemetry</button>
               <button class="settings-tree-child" type="button" data-settings-section="gpu">Fan control</button>
               <button class="settings-tree-child" type="button" data-settings-section="gpu">Watchdog curve</button>
               <button class="settings-tree-item" type="button">
@@ -436,6 +436,10 @@
                   <h2 id="settings-section-title">Runtime service</h2>
                 </div>
                 <div class="settings-actions">
+                  <label class="settings-advanced-toggle" for="settings-advanced-toggle">
+                    <span>Advanced</span>
+                    <input type="checkbox" id="settings-advanced-toggle" />
+                  </label>
                   <button type="button" class="secondary" id="settings-refresh-btn">Refresh</button>
                   <button type="button" class="primary" id="settings-save-btn" disabled>Save</button>
                 </div>
@@ -444,8 +448,10 @@
               <div class="settings-grid" id="settings-field-grid"></div>
               <p class="settings-save-status muted" id="settings-save-status">Read-only until an editable branch is selected.</p>
 
-              <div class="settings-section-title">Effective configuration</div>
-              <div class="settings-table" id="settings-effective-table"></div>
+              <div id="settings-effective-wrap">
+                <div class="settings-section-title">Effective configuration</div>
+                <div class="settings-table" id="settings-effective-table"></div>
+              </div>
             </section>
           </div>
         </section>
