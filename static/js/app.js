@@ -3,13 +3,14 @@ const qs = (sel, root = document) => root.querySelector(sel);
 const qsa = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 // Tab state + hash routing
-const VALID_TABS = ["llm", "image", "links", "chat", "logs"];
+const VALID_TABS = ["llm", "image", "links", "chat", "logs", "settings"];
 const SUBTAB_OPTIONS = {
   llm: ["overview", "vm-controls", "thermal", "health", "models"],
   image: ["main", "image-edit", "future"],
   links: ["main", "placeholder-a", "placeholder-b"],
   chat: ["main", "placeholder-a", "placeholder-b"],
   logs: ["main", "placeholder-a", "placeholder-b"],
+  settings: ["main"],
 };
 
 const LLM_SECTION_TARGETS = {
@@ -27,6 +28,7 @@ let activeSubtabs = {
   links: "main",
   chat: "main",
   logs: "main",
+  settings: "main",
 };
 
 let statusTimer = null;
@@ -1096,6 +1098,11 @@ function closeModal() {
 function initApp() {
   const mainTabs = qs(".main-tabs");
   if (mainTabs) mainTabs.addEventListener("click", handleMainTabClick);
+
+  const settingsCogBtn = qs("#settings-cog-btn");
+  if (settingsCogBtn) {
+    settingsCogBtn.addEventListener("click", () => activateTab("settings", "main", { pushHash: true }));
+  }
 
   initSubtabs();
   initLlmSectionNavigation();
