@@ -400,27 +400,27 @@
           <div class="settings-shell">
             <aside class="settings-tree" aria-label="Settings tree">
               <div class="settings-tree-title">Settings</div>
-              <button class="settings-tree-item active" type="button">
+              <button class="settings-tree-item active" type="button" data-settings-section="runtime">
                 <span class="tree-caret">▾</span>
                 Runtime
               </button>
-              <button class="settings-tree-child active" type="button">Service</button>
+              <button class="settings-tree-child active" type="button" data-settings-section="runtime">Service</button>
               <button class="settings-tree-child" type="button">Logging</button>
               <button class="settings-tree-child" type="button">Health checks</button>
-              <button class="settings-tree-item" type="button">
+              <button class="settings-tree-item" type="button" data-settings-section="proxmox">
                 <span class="tree-caret">▾</span>
                 Proxmox
               </button>
-              <button class="settings-tree-child" type="button">Connection</button>
-              <button class="settings-tree-child" type="button">VM map</button>
-              <button class="settings-tree-child" type="button">Power policy</button>
-              <button class="settings-tree-item" type="button">
+              <button class="settings-tree-child" type="button" data-settings-section="proxmox">Connection</button>
+              <button class="settings-tree-child" type="button" data-settings-section="proxmox">VM map</button>
+              <button class="settings-tree-child" type="button" data-settings-section="proxmox">Power policy</button>
+              <button class="settings-tree-item" type="button" data-settings-section="gpu">
                 <span class="tree-caret">▾</span>
                 GPU
               </button>
-              <button class="settings-tree-child" type="button">Telemetry</button>
-              <button class="settings-tree-child" type="button">Fan control</button>
-              <button class="settings-tree-child" type="button">Watchdog curve</button>
+              <button class="settings-tree-child" type="button" data-settings-section="gpu">Telemetry</button>
+              <button class="settings-tree-child" type="button" data-settings-section="gpu">Fan control</button>
+              <button class="settings-tree-child" type="button" data-settings-section="gpu">Watchdog curve</button>
               <button class="settings-tree-item" type="button">
                 <span class="tree-caret">▾</span>
                 API
@@ -432,78 +432,19 @@
             <section class="settings-content">
               <div class="settings-heading-row">
                 <div>
-                  <div class="label">SETTINGS MOCKUP</div>
-                  <h2>Runtime service</h2>
+                  <div class="label">EFFECTIVE SETTINGS</div>
+                  <h2 id="settings-section-title">Runtime service</h2>
                 </div>
                 <div class="settings-actions">
-                  <button type="button" class="secondary">Reset</button>
-                  <button type="button" class="primary">Save</button>
+                  <button type="button" class="secondary" id="settings-refresh-btn">Refresh</button>
+                  <button type="button" class="primary" disabled>Save</button>
                 </div>
               </div>
 
-              <div class="settings-grid">
-                <div class="settings-field">
-                  <label for="mock-service-name">Service unit</label>
-                  <input id="mock-service-name" type="text" value="llm-agent.service" />
-                </div>
-                <div class="settings-field">
-                  <label for="mock-bind-address">Bind address</label>
-                  <input id="mock-bind-address" type="text" value="0.0.0.0:8000" />
-                </div>
-                <div class="settings-field">
-                  <label for="mock-log-level">Log level</label>
-                  <select id="mock-log-level">
-                    <option>INFO</option>
-                    <option>WARNING</option>
-                    <option>DEBUG</option>
-                  </select>
-                </div>
-                <div class="settings-field inline-setting">
-                  <span>
-                    <b>Auto restart</b>
-                    <small>systemd Restart=always</small>
-                  </span>
-                  <input type="checkbox" checked />
-                </div>
-                <div class="settings-field inline-setting">
-                  <span>
-                    <b>Reload from UI</b>
-                    <small>sudoers-gated restart action</small>
-                  </span>
-                  <input type="checkbox" checked />
-                </div>
-                <div class="settings-field inline-setting">
-                  <span>
-                    <b>Watch files</b>
-                    <small>development reload only</small>
-                  </span>
-                  <input type="checkbox" />
-                </div>
-              </div>
+              <div class="settings-grid" id="settings-field-grid"></div>
 
               <div class="settings-section-title">Effective configuration</div>
-              <div class="settings-table">
-                <div class="settings-row">
-                  <span>PROXMOX_HOST</span>
-                  <code>192.168.8.31</code>
-                  <em>llm_secrets.py</em>
-                </div>
-                <div class="settings-row">
-                  <span>LLM_VM_ID</span>
-                  <code>101</code>
-                  <em>llm_secrets.py</em>
-                </div>
-                <div class="settings-row">
-                  <span>GPU_TELEMETRY_SKIP_WHEN_VM_OFF</span>
-                  <code>true</code>
-                  <em>default</em>
-                </div>
-                <div class="settings-row">
-                  <span>ILO_SSH_STRICT_HOSTKEY</span>
-                  <code>false</code>
-                  <em>llm_secrets.py</em>
-                </div>
-              </div>
+              <div class="settings-table" id="settings-effective-table"></div>
             </section>
           </div>
         </section>

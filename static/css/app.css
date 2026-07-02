@@ -638,6 +638,18 @@ button:disabled {
   font-size: 0.74rem;
 }
 
+.settings-field .settings-value {
+  display: block;
+  min-height: 1.8rem;
+  margin: 0.35rem 0;
+  padding: 0.35rem 0.45rem;
+  overflow-wrap: anywhere;
+  border: 1px solid #eadfce;
+  background: #fffdf8;
+  color: #2f5d50;
+  border-radius: var(--radius-sm);
+}
+
 .settings-field input[type="text"],
 .settings-field select {
   width: 100%;

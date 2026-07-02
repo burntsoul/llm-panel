@@ -1179,6 +1179,56 @@ async def api_service_restart():
     }
 
 
+@app.get("/api/settings/effective")
+def api_settings_effective():
+    """
+    Return a safe, non-secret subset of effective settings for the UI.
+    Secrets are represented only as configured/missing.
+    """
+    return {
+        "ok": True,
+        "sections": {
+            "runtime": {
+                "title": "Runtime service",
+                "fields": [
+                    {"key": "SERVICE_UNIT_NAME", "label": "Service unit", "value": SERVICE_UNIT_NAME, "type": "text", "source": "app.py"},
+                    {"key": "LOG_LEVEL", "label": "Log level", "value": settings.LOG_LEVEL, "type": "text", "source": "config"},
+                    {"key": "LOG_FILE", "label": "Log file", "value": settings.LOG_FILE, "type": "path", "source": "config"},
+                    {"key": "SERVICE_RESTART_DELAY_SECONDS", "label": "Restart delay", "value": SERVICE_RESTART_DELAY_SECONDS, "type": "number", "unit": "s", "source": "app.py"},
+                ],
+            },
+            "proxmox": {
+                "title": "Proxmox connection",
+                "fields": [
+                    {"key": "PROXMOX_HOST", "label": "Host", "value": settings.PROXMOX_HOST, "type": "text", "source": "config"},
+                    {"key": "PROXMOX_PORT", "label": "Port", "value": settings.PROXMOX_PORT, "type": "number", "source": "config"},
+                    {"key": "PROXMOX_NODE", "label": "Node", "value": settings.PROXMOX_NODE, "type": "text", "source": "config"},
+                    {"key": "PROXMOX_TOKEN_ID", "label": "Token ID", "value": "configured" if settings.PROXMOX_TOKEN_ID else "missing", "type": "secret-status", "source": "llm_secrets.py"},
+                    {"key": "PROXMOX_TOKEN_SECRET", "label": "Token secret", "value": "configured" if settings.PROXMOX_TOKEN_SECRET else "missing", "type": "secret-status", "source": "llm_secrets.py"},
+                    {"key": "LLM_VM_ID", "label": "LLM VM ID", "value": settings.LLM_VM_ID, "type": "number", "source": "config"},
+                    {"key": "WINDOWS_VM_ID", "label": "Windows VM ID", "value": settings.WINDOWS_VM_ID, "type": "number", "source": "config"},
+                    {"key": "ENFORCE_EXCLUSIVE_VMS", "label": "Enforce exclusive VMs", "value": settings.ENFORCE_EXCLUSIVE_VMS, "type": "boolean", "source": "config"},
+                ],
+            },
+            "gpu": {
+                "title": "GPU telemetry and fan control",
+                "fields": [
+                    {"key": "GPU_TELEMETRY_PROVIDER", "label": "Telemetry provider", "value": settings.GPU_TELEMETRY_PROVIDER, "type": "text", "source": "config"},
+                    {"key": "GLANCES_API_BASE_V4", "label": "Glances API v4", "value": settings.GLANCES_API_BASE_V4, "type": "url", "source": "config"},
+                    {"key": "GPU_TELEMETRY_SKIP_WHEN_VM_OFF", "label": "Skip when VM off", "value": settings.GPU_TELEMETRY_SKIP_WHEN_VM_OFF, "type": "boolean", "source": "config"},
+                    {"key": "GPU_TELEMETRY_LOG_THROTTLE_SECONDS", "label": "Log throttle", "value": settings.GPU_TELEMETRY_LOG_THROTTLE_SECONDS, "type": "number", "unit": "s", "source": "config"},
+                    {"key": "WATCHDOG_ENABLED", "label": "Watchdog enabled by default", "value": settings.WATCHDOG_ENABLED, "type": "boolean", "source": "config"},
+                    {"key": "WATCHDOG_POLL_SECONDS", "label": "Watchdog poll", "value": settings.WATCHDOG_POLL_SECONDS, "type": "number", "unit": "s", "source": "config"},
+                    {"key": "ILO_HOST", "label": "iLO host", "value": settings.ILO_HOST or "missing", "type": "text", "source": "llm_secrets.py"},
+                    {"key": "ILO_USER", "label": "iLO user", "value": settings.ILO_USER or "missing", "type": "text", "source": "llm_secrets.py"},
+                    {"key": "ILO_PASSWORD", "label": "iLO password", "value": "configured" if settings.ILO_PASSWORD else "missing", "type": "secret-status", "source": "llm_secrets.py"},
+                    {"key": "ILO_SSH_STRICT_HOSTKEY", "label": "Strict host key", "value": settings.ILO_SSH_STRICT_HOSTKEY, "type": "boolean", "source": "config"},
+                ],
+            },
+        },
+    }
+
+
 @app.get("/api/logs")
 def api_logs(lines: int = 200):
     """

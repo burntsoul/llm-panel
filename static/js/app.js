@@ -35,6 +35,8 @@ let statusTimer = null;
 let logsTimer = null;
 let llmTimer = null;
 let previousGpuTemp = null;
+let settingsData = null;
+let activeSettingsSection = "runtime";
 
 function getDefaultSubtab(tab) {
   const options = SUBTAB_OPTIONS[tab] || ["main"];
@@ -1038,6 +1040,114 @@ async function fetchLogs() {
   }
 }
 
+// SETTINGS tab logic
+function formatSettingValue(field) {
+  if (!field) return "";
+  if (field.type === "boolean") return field.value ? "true" : "false";
+  if (field.unit && field.value !== undefined && field.value !== null && field.value !== "") {
+    return `${field.value} ${field.unit}`;
+  }
+  if (field.value === null || field.value === undefined || field.value === "") return "-";
+  return String(field.value);
+}
+
+function renderSettingsSection(sectionId) {
+  const sections = settingsData && settingsData.sections ? settingsData.sections : {};
+  const section = sections[sectionId] || sections.runtime;
+  if (!section) return;
+
+  activeSettingsSection = sectionId;
+  setText("settings-section-title", section.title || "Settings");
+
+  qsa("[data-settings-section]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.settingsSection === sectionId);
+  });
+
+  const grid = qs("#settings-field-grid");
+  if (grid) {
+    grid.innerHTML = "";
+    (section.fields || []).forEach((field) => {
+      const card = document.createElement("div");
+      card.className = "settings-field";
+
+      if (field.type === "boolean") {
+        card.classList.add("inline-setting");
+        const text = document.createElement("span");
+        const label = document.createElement("b");
+        label.textContent = field.label || field.key;
+        const source = document.createElement("small");
+        source.textContent = field.source || "";
+        text.append(label, source);
+
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.checked = !!field.value;
+        input.disabled = true;
+        card.append(text, input);
+      } else {
+        const label = document.createElement("label");
+        label.textContent = field.label || field.key;
+        const value = document.createElement("code");
+        value.className = "settings-value";
+        value.textContent = formatSettingValue(field);
+        const source = document.createElement("small");
+        source.textContent = field.source || "";
+        card.append(label, value, source);
+      }
+
+      grid.appendChild(card);
+    });
+  }
+
+  const table = qs("#settings-effective-table");
+  if (table) {
+    table.innerHTML = "";
+    (section.fields || []).forEach((field) => {
+      const row = document.createElement("div");
+      row.className = "settings-row";
+      const key = document.createElement("span");
+      key.textContent = field.key || "";
+      const value = document.createElement("code");
+      value.textContent = formatSettingValue(field);
+      const source = document.createElement("em");
+      source.textContent = field.source || "";
+      row.append(key, value, source);
+      table.appendChild(row);
+    });
+  }
+}
+
+async function loadSettings(sectionId = activeSettingsSection) {
+  const grid = qs("#settings-field-grid");
+  if (grid && !settingsData) {
+    grid.innerHTML = "<div class='settings-field'><span class='muted'>Loading settings...</span></div>";
+  }
+
+  try {
+    settingsData = await getJson("/api/settings/effective");
+    renderSettingsSection(sectionId);
+  } catch (err) {
+    if (grid) {
+      grid.innerHTML = `<div class='settings-field'><span class='status-error'>Settings load failed: ${err}</span></div>`;
+    }
+  }
+}
+
+function initSettings() {
+  qsa("[data-settings-section]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const sectionId = btn.dataset.settingsSection || "runtime";
+      if (!settingsData) loadSettings(sectionId);
+      else renderSettingsSection(sectionId);
+    });
+  });
+
+  const refreshBtn = qs("#settings-refresh-btn");
+  if (refreshBtn) {
+    refreshBtn.addEventListener("click", () => loadSettings(activeSettingsSection));
+  }
+}
+
 // Shared polling scheduler
 function syncTabPolling() {
   if (activeTab === "logs") {
@@ -1062,6 +1172,10 @@ function syncTabPolling() {
   } else if (llmTimer) {
     window.clearInterval(llmTimer);
     llmTimer = null;
+  }
+
+  if (activeTab === "settings" && !settingsData) {
+    loadSettings(activeSettingsSection);
   }
 }
 
@@ -1113,6 +1227,7 @@ function initApp() {
   initImageEditTool();
   initChat();
   initLogs();
+  initSettings();
 
   const initial = parseHash();
   activateTab(initial.tab, initial.subtab, { pushHash: false, scrollSubtab: initial.hasSubtab });
