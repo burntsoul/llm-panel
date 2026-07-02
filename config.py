@@ -5,6 +5,8 @@ import json
 import os
 from pathlib import Path
 
+from config_store import effective_gpu_telemetry_values
+
 try:
     import llm_secrets as secrets  # type: ignore
 except Exception:
@@ -163,10 +165,14 @@ class Settings:
             "GLANCES_API_BASE_V4",
             f"http://{self.LLM_HOST}:61208/api/4",
         )
-        self.GLANCES_GPU_ID = _env("GLANCES_GPU_ID", "nvidia0")
-        self.GLANCES_TIMEOUT_SECONDS = _env_float("GLANCES_TIMEOUT_SECONDS", 2.5)
-        self.GPU_TELEMETRY_SKIP_WHEN_VM_OFF = _conf_bool("GPU_TELEMETRY_SKIP_WHEN_VM_OFF", True)
-        self.GPU_TELEMETRY_LOG_THROTTLE_SECONDS = _conf_float("GPU_TELEMETRY_LOG_THROTTLE_SECONDS", 60.0)
+        gpu_telemetry = effective_gpu_telemetry_values(
+            secrets_module=secrets,
+            ignore_local_errors=True,
+        )
+        self.GLANCES_GPU_ID = str(gpu_telemetry["glances_gpu_id"].value)
+        self.GLANCES_TIMEOUT_SECONDS = float(gpu_telemetry["glances_timeout_seconds"].value)
+        self.GPU_TELEMETRY_SKIP_WHEN_VM_OFF = bool(gpu_telemetry["skip_when_vm_off"].value)
+        self.GPU_TELEMETRY_LOG_THROTTLE_SECONDS = float(gpu_telemetry["log_throttle_seconds"].value)
         self.GPU_WATCHDOG_ENABLED = _env_bool(
             "GPU_WATCHDOG_ENABLED",
             _env_bool("WATCHDOG_ENABLED", False),

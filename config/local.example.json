@@ -1,0 +1,10 @@
+{
+  "gpu": {
+    "telemetry": {
+      "glances_gpu_id": "nvidia0",
+      "glances_timeout_seconds": 2.5,
+      "log_throttle_seconds": 60.0,
+      "skip_when_vm_off": true
+    }
+  }
+}

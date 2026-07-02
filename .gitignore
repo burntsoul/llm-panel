@@ -4,6 +4,7 @@ state.json
 __pycache__/
 *.pyc
 .env
+config/local.json
 
 
 # Local virtualenv

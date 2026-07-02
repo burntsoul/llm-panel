@@ -37,6 +37,7 @@ let llmTimer = null;
 let previousGpuTemp = null;
 let settingsData = null;
 let activeSettingsSection = "runtime";
+let settingsDirty = false;
 
 function getDefaultSubtab(tab) {
   const options = SUBTAB_OPTIONS[tab] || ["main"];
@@ -1057,7 +1058,10 @@ function renderSettingsSection(sectionId) {
   if (!section) return;
 
   activeSettingsSection = sectionId;
+  settingsDirty = false;
   setText("settings-section-title", section.title || "Settings");
+  setSettingsSaveStatus(section.editable ? "No changes." : "Read-only branch.");
+  updateSettingsSaveButton(section);
 
   qsa("[data-settings-section]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.settingsSection === sectionId);
@@ -1066,9 +1070,19 @@ function renderSettingsSection(sectionId) {
   const grid = qs("#settings-field-grid");
   if (grid) {
     grid.innerHTML = "";
+    if (section.error) {
+      const card = document.createElement("div");
+      card.className = "settings-field";
+      const message = document.createElement("span");
+      message.className = "status-error";
+      message.textContent = section.error;
+      card.appendChild(message);
+      grid.appendChild(card);
+    }
     (section.fields || []).forEach((field) => {
       const card = document.createElement("div");
       card.className = "settings-field";
+      const editable = !!section.editable && field.editable !== false;
 
       if (field.type === "boolean") {
         card.classList.add("inline-setting");
@@ -1082,17 +1096,29 @@ function renderSettingsSection(sectionId) {
         const input = document.createElement("input");
         input.type = "checkbox";
         input.checked = !!field.value;
-        input.disabled = true;
+        input.disabled = !editable;
+        input.dataset.configKey = field.config_key || "";
+        input.addEventListener("change", markSettingsDirty);
         card.append(text, input);
       } else {
         const label = document.createElement("label");
         label.textContent = field.label || field.key;
-        const value = document.createElement("code");
-        value.className = "settings-value";
-        value.textContent = formatSettingValue(field);
         const source = document.createElement("small");
         source.textContent = field.source || "";
-        card.append(label, value, source);
+        if (editable) {
+          const input = document.createElement("input");
+          input.type = field.type === "number" ? "number" : "text";
+          if (field.type === "number") input.step = "any";
+          input.value = field.value === null || field.value === undefined ? "" : String(field.value);
+          input.dataset.configKey = field.config_key || "";
+          input.addEventListener("input", markSettingsDirty);
+          card.append(label, input, source);
+        } else {
+          const value = document.createElement("code");
+          value.className = "settings-value";
+          value.textContent = formatSettingValue(field);
+          card.append(label, value, source);
+        }
       }
 
       grid.appendChild(card);
@@ -1114,6 +1140,68 @@ function renderSettingsSection(sectionId) {
       row.append(key, value, source);
       table.appendChild(row);
     });
+  }
+}
+
+function setSettingsSaveStatus(message, isError = false) {
+  const node = qs("#settings-save-status");
+  if (!node) return;
+  node.textContent = message;
+  node.classList.toggle("status-error", !!isError);
+  node.classList.toggle("status-ok-text", !isError && message && message !== "No changes.");
+}
+
+function updateSettingsSaveButton(section = null) {
+  const saveBtn = qs("#settings-save-btn");
+  if (!saveBtn) return;
+  const activeSection = section || (settingsData && settingsData.sections ? settingsData.sections[activeSettingsSection] : null);
+  saveBtn.disabled = !(activeSection && activeSection.editable && settingsDirty);
+}
+
+function markSettingsDirty() {
+  settingsDirty = true;
+  setSettingsSaveStatus("Unsaved changes.");
+  updateSettingsSaveButton();
+}
+
+function collectSettingsValues() {
+  const values = {};
+  qsa("#settings-field-grid [data-config-key]").forEach((input) => {
+    const key = input.dataset.configKey;
+    if (!key) return;
+    if (input.type === "checkbox") values[key] = input.checked;
+    else if (input.type === "number") values[key] = input.value === "" ? null : Number(input.value);
+    else values[key] = input.value;
+  });
+  return values;
+}
+
+async function saveSettings() {
+  const section = settingsData && settingsData.sections ? settingsData.sections[activeSettingsSection] : null;
+  if (!section || !section.editable || !section.save_endpoint) return;
+
+  const saveBtn = qs("#settings-save-btn");
+  if (saveBtn) saveBtn.disabled = true;
+  setSettingsSaveStatus("Saving...");
+
+  try {
+    const data = await getJson(section.save_endpoint, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ values: collectSettingsValues() }),
+    });
+
+    if (data.section && settingsData.sections) {
+      settingsData.sections[activeSettingsSection] = data.section;
+    } else {
+      settingsData = await getJson("/api/settings/effective");
+    }
+    renderSettingsSection(activeSettingsSection);
+    setSettingsSaveStatus("Saved.", false);
+  } catch (err) {
+    settingsDirty = true;
+    setSettingsSaveStatus(`Save failed: ${err}`, true);
+    updateSettingsSaveButton(section);
   }
 }
 
@@ -1145,6 +1233,11 @@ function initSettings() {
   const refreshBtn = qs("#settings-refresh-btn");
   if (refreshBtn) {
     refreshBtn.addEventListener("click", () => loadSettings(activeSettingsSection));
+  }
+
+  const saveBtn = qs("#settings-save-btn");
+  if (saveBtn) {
+    saveBtn.addEventListener("click", saveSettings);
   }
 }
 

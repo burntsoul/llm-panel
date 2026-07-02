@@ -651,9 +651,25 @@ button:disabled {
 }
 
 .settings-field input[type="text"],
+.settings-field input[type="number"],
 .settings-field select {
   width: 100%;
   margin-top: 0.35rem;
+}
+
+.settings-field input[type="text"],
+.settings-field input[type="number"] {
+  border: 1px solid #eadfce;
+  background: #fffdf8;
+  color: var(--ink);
+  padding: 0.35rem 0.45rem;
+  border-radius: var(--radius-sm);
+}
+
+.settings-save-status {
+  min-height: 1.2rem;
+  margin: 0.55rem 0 0;
+  font-size: 0.8rem;
 }
 
 .inline-setting {

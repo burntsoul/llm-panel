@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, Form
+from fastapi import FastAPI, Request, Form, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -12,6 +12,14 @@ import logging
 import subprocess
 
 from config import settings
+from config import secrets as config_secrets
+from config_store import (
+    ConfigStoreError,
+    ConfigValidationError,
+    effective_gpu_telemetry_values,
+    gpu_telemetry_fields_for_api,
+    update_gpu_telemetry_config,
+)
 from lo100 import get_lo100_health_and_temp
 from proxmox import get_vm_status, start_vm, shutdown_vm, stop_vm
 from state import get_maintenance_mode, toggle_maintenance_mode, set_maintenance_mode
@@ -1185,6 +1193,15 @@ def api_settings_effective():
     Return a safe, non-secret subset of effective settings for the UI.
     Secrets are represented only as configured/missing.
     """
+    gpu_telemetry_error = None
+    try:
+        gpu_telemetry_fields = gpu_telemetry_fields_for_api(secrets_module=config_secrets)
+        gpu_telemetry_editable = True
+    except ConfigStoreError as exc:
+        gpu_telemetry_fields = []
+        gpu_telemetry_error = str(exc)
+        gpu_telemetry_editable = False
+
     return {
         "ok": True,
         "sections": {
@@ -1210,21 +1227,67 @@ def api_settings_effective():
                     {"key": "ENFORCE_EXCLUSIVE_VMS", "label": "Enforce exclusive VMs", "value": settings.ENFORCE_EXCLUSIVE_VMS, "type": "boolean", "source": "config"},
                 ],
             },
+            "gpu_telemetry": {
+                "title": "GPU telemetry",
+                "editable": gpu_telemetry_editable,
+                "save_endpoint": "/api/settings/gpu/telemetry",
+                "error": gpu_telemetry_error,
+                "fields": gpu_telemetry_fields,
+            },
             "gpu": {
-                "title": "GPU telemetry and fan control",
+                "title": "GPU fan control",
                 "fields": [
-                    {"key": "GPU_TELEMETRY_PROVIDER", "label": "Telemetry provider", "value": settings.GPU_TELEMETRY_PROVIDER, "type": "text", "source": "config"},
-                    {"key": "GLANCES_API_BASE_V4", "label": "Glances API v4", "value": settings.GLANCES_API_BASE_V4, "type": "url", "source": "config"},
-                    {"key": "GPU_TELEMETRY_SKIP_WHEN_VM_OFF", "label": "Skip when VM off", "value": settings.GPU_TELEMETRY_SKIP_WHEN_VM_OFF, "type": "boolean", "source": "config"},
-                    {"key": "GPU_TELEMETRY_LOG_THROTTLE_SECONDS", "label": "Log throttle", "value": settings.GPU_TELEMETRY_LOG_THROTTLE_SECONDS, "type": "number", "unit": "s", "source": "config"},
-                    {"key": "WATCHDOG_ENABLED", "label": "Watchdog enabled by default", "value": settings.WATCHDOG_ENABLED, "type": "boolean", "source": "config"},
-                    {"key": "WATCHDOG_POLL_SECONDS", "label": "Watchdog poll", "value": settings.WATCHDOG_POLL_SECONDS, "type": "number", "unit": "s", "source": "config"},
-                    {"key": "ILO_HOST", "label": "iLO host", "value": settings.ILO_HOST or "missing", "type": "text", "source": "llm_secrets.py"},
-                    {"key": "ILO_USER", "label": "iLO user", "value": settings.ILO_USER or "missing", "type": "text", "source": "llm_secrets.py"},
-                    {"key": "ILO_PASSWORD", "label": "iLO password", "value": "configured" if settings.ILO_PASSWORD else "missing", "type": "secret-status", "source": "llm_secrets.py"},
-                    {"key": "ILO_SSH_STRICT_HOSTKEY", "label": "Strict host key", "value": settings.ILO_SSH_STRICT_HOSTKEY, "type": "boolean", "source": "config"},
+                    {"key": "GPU_TELEMETRY_PROVIDER", "label": "Telemetry provider", "value": settings.GPU_TELEMETRY_PROVIDER, "type": "text", "source": "config", "editable": False},
+                    {"key": "GLANCES_API_BASE_V4", "label": "Glances API v4", "value": settings.GLANCES_API_BASE_V4, "type": "url", "source": "config", "editable": False},
+                    {"key": "WATCHDOG_ENABLED", "label": "Watchdog enabled by default", "value": settings.WATCHDOG_ENABLED, "type": "boolean", "source": "config", "editable": False},
+                    {"key": "WATCHDOG_POLL_SECONDS", "label": "Watchdog poll", "value": settings.WATCHDOG_POLL_SECONDS, "type": "number", "unit": "s", "source": "config", "editable": False},
+                    {"key": "ILO_HOST", "label": "iLO host", "value": settings.ILO_HOST or "missing", "type": "text", "source": "llm_secrets.py", "editable": False},
+                    {"key": "ILO_USER", "label": "iLO user", "value": settings.ILO_USER or "missing", "type": "text", "source": "llm_secrets.py", "editable": False},
+                    {"key": "ILO_PASSWORD", "label": "iLO password", "value": "configured" if settings.ILO_PASSWORD else "missing", "type": "secret-status", "source": "llm_secrets.py", "editable": False},
+                    {"key": "ILO_SSH_STRICT_HOSTKEY", "label": "Strict host key", "value": settings.ILO_SSH_STRICT_HOSTKEY, "type": "boolean", "source": "config", "editable": False},
                 ],
             },
+        },
+    }
+
+
+def _refresh_gpu_telemetry_settings_from_store() -> None:
+    effective = effective_gpu_telemetry_values(secrets_module=config_secrets)
+    settings.GLANCES_GPU_ID = str(effective["glances_gpu_id"].value)
+    settings.GLANCES_TIMEOUT_SECONDS = float(effective["glances_timeout_seconds"].value)
+    settings.GPU_TELEMETRY_SKIP_WHEN_VM_OFF = bool(effective["skip_when_vm_off"].value)
+    settings.GPU_TELEMETRY_LOG_THROTTLE_SECONDS = float(effective["log_throttle_seconds"].value)
+
+
+@app.put("/api/settings/gpu/telemetry")
+async def api_settings_update_gpu_telemetry(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail={"error": "invalid JSON body"})
+
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail={"error": "body must be a JSON object"})
+
+    values = body.get("values", body)
+    if not isinstance(values, dict):
+        raise HTTPException(status_code=400, detail={"error": "values must be a JSON object"})
+
+    try:
+        update_gpu_telemetry_config(values)
+        _refresh_gpu_telemetry_settings_from_store()
+    except ConfigValidationError as exc:
+        raise HTTPException(status_code=400, detail={"error": "validation failed", "fields": exc.errors})
+    except ConfigStoreError as exc:
+        raise HTTPException(status_code=400, detail={"error": str(exc)})
+
+    return {
+        "ok": True,
+        "section": {
+            "title": "GPU telemetry",
+            "editable": True,
+            "save_endpoint": "/api/settings/gpu/telemetry",
+            "fields": gpu_telemetry_fields_for_api(secrets_module=config_secrets),
         },
     }
 
