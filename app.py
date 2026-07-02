@@ -9,6 +9,7 @@ import httpx
 import time
 import base64
 import logging
+import subprocess
 
 from config import settings
 from lo100 import get_lo100_health_and_temp
@@ -18,6 +19,7 @@ from llm_server import (
     llm_server_up,
     is_llm_server_busy,
     ensure_llm_running,
+    ensure_llm_running_with_reason,
     ensure_llm_running_and_ready,
     idle_shutdown_loop,
     cpu_activity_poller,
@@ -47,6 +49,9 @@ from ilo_fan import set_ilo_fan_min, get_last_fan_command_result
 from logging_setup import configure_logging
 
 logger = logging.getLogger("llm-agent")
+
+SERVICE_UNIT_NAME = "llm-agent.service"
+SERVICE_RESTART_DELAY_SECONDS = 0.75
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -933,10 +938,10 @@ def power_json(action: str = Form(...)):
     # LLM VM commands
     if action == "llm_on":
         # käynnistä + odota että Ollama vastaa
-        ok = ensure_llm_running()
+        ok, msg = ensure_llm_running_with_reason()
         if ok:
-            return _status_payload(True, "LLM käynnistetty (Ollama vastaa).")
-        return _status_payload(False, "LLM:n käynnistys epäonnistui (katso lokit).")
+            return _status_payload(True, msg)
+        return _status_payload(False, f"LLM:n käynnistys epäonnistui: {msg}")
 
     if action in ("llm_shutdown", "llm_stop"):
         # estä shutdown jos selvästi kuormaa (paitsi huoltotilassa)
@@ -1133,6 +1138,45 @@ def api_status():
 async def api_comfyui_wake():
     ok = await ensure_comfyui_ready()
     return {"ok": ok, "up": comfyui_up(), "error": get_comfyui_last_error()}
+
+
+async def _restart_service_after_response() -> None:
+    await asyncio.sleep(SERVICE_RESTART_DELAY_SECONDS)
+
+    commands = [
+        ["systemctl", "--no-block", "restart", SERVICE_UNIT_NAME],
+        ["sudo", "-n", "systemctl", "--no-block", "restart", SERVICE_UNIT_NAME],
+    ]
+
+    for command in commands:
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+        except FileNotFoundError:
+            continue
+        except Exception as exc:
+            logger.warning("Service restart command failed to run: %s", exc)
+            continue
+
+        if result.returncode == 0:
+            logger.info("Scheduled service restart for %s", SERVICE_UNIT_NAME)
+            return
+
+        stderr = (result.stderr or result.stdout or "").strip()
+        logger.warning("Service restart command failed (%s): %s", command[0], stderr)
+
+    logger.error(
+        "Unable to restart %s. Grant the llm-agent user permission to run systemctl restart.",
+        SERVICE_UNIT_NAME,
+    )
+
+
+@app.post("/api/service/restart")
+async def api_service_restart():
+    asyncio.create_task(_restart_service_after_response())
+    return {
+        "ok": True,
+        "message": f"Restart scheduled for {SERVICE_UNIT_NAME}. The UI may disconnect briefly.",
+    }
 
 
 @app.get("/api/logs")

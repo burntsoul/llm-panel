@@ -365,6 +365,11 @@ function initPowerButtons() {
     btn.addEventListener("click", () => sendPower(btn.dataset.powerAction || ""));
   });
 
+  const restartServiceBtn = qs("#restart-service-btn");
+  if (restartServiceBtn) {
+    restartServiceBtn.addEventListener("click", restartService);
+  }
+
   const openModelsBtn = qs("#open-models-btn");
   if (openModelsBtn) {
     openModelsBtn.addEventListener("click", openModelsModal);
@@ -398,6 +403,39 @@ async function sendPower(action) {
     await refreshStatus();
   } catch (err) {
     openModal("Virhe", `<p>Virta-komento epaonnistui: ${err}</p>`);
+  }
+}
+
+function setRestartServiceStatus(message, isError = false) {
+  const node = qs("#restart-service-status");
+  if (!node) return;
+  node.textContent = message;
+  node.classList.toggle("status-error", !!isError);
+  node.classList.toggle("status-ok-text", !isError);
+}
+
+async function restartService() {
+  const btn = qs("#restart-service-btn");
+  if (btn) btn.disabled = true;
+  setRestartServiceStatus("Scheduling service reload...");
+
+  try {
+    const data = await getJson("/api/service/restart", { method: "POST" });
+    if (!data.ok) {
+      throw new Error(data.error || data.message || "unknown error");
+    }
+
+    const message = data.message || "Service reload scheduled.";
+    setRestartServiceStatus(message, false);
+    openModal("LLM-agent service", `<p>${message}</p><p>The page will refresh shortly.</p>`);
+
+    window.setTimeout(() => {
+      window.location.reload();
+    }, 3500);
+  } catch (err) {
+    setRestartServiceStatus(`Service reload failed: ${err}`, true);
+    openModal("Virhe", `<p>Service reload failed: ${err}</p>`);
+    if (btn) btn.disabled = false;
   }
 }
 

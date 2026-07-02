@@ -55,7 +55,10 @@ class TestGpuTelemetry(unittest.TestCase):
     def test_timeout_path(self, mock_get):
         mock_get.side_effect = requests.Timeout("timed out")
 
-        with patch.object(settings, "GLANCES_TIMEOUT_SECONDS", 0.1):
+        with (
+            patch.object(settings, "GLANCES_TIMEOUT_SECONDS", 0.1),
+            patch.object(settings, "GPU_TELEMETRY_SKIP_WHEN_VM_OFF", False),
+        ):
             result = get_remote_glances_gpu_telemetry()
 
         self.assertFalse(result["telemetry_ok"])
@@ -70,11 +73,28 @@ class TestGpuTelemetry(unittest.TestCase):
         ]
         mock_get.return_value = mock_response
 
-        with patch.object(settings, "GLANCES_GPU_ID", ""):
+        with (
+            patch.object(settings, "GLANCES_GPU_ID", ""),
+            patch.object(settings, "GPU_TELEMETRY_SKIP_WHEN_VM_OFF", False),
+        ):
             result = get_remote_glances_gpu_telemetry()
 
         self.assertTrue(result["telemetry_ok"])
         self.assertEqual(result["gpu_id"], "nvidia0")
+
+    @patch("gpu_telemetry.requests.get")
+    @patch("gpu_telemetry.get_vm_status")
+    def test_skip_when_vm_stopped(self, mock_get_vm_status, mock_get):
+        mock_get_vm_status.return_value = "stopped"
+
+        with patch.object(settings, "GPU_TELEMETRY_SKIP_WHEN_VM_OFF", True):
+            result = get_remote_glances_gpu_telemetry()
+
+        self.assertFalse(result["telemetry_ok"])
+        self.assertFalse(result["telemetry_applicable"])
+        self.assertEqual(result["vm_state"], "stopped")
+        self.assertIn("skipped", result["error"].lower())
+        mock_get.assert_not_called()
 
 
 if __name__ == "__main__":

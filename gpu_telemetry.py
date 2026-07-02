@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import datetime
 import logging
+import time
 from typing import Any, Dict, Optional
 
 import requests
 
 from config import settings
+from proxmox import get_vm_status
 
 
 logger = logging.getLogger(__name__)
+_last_warning_at: Dict[str, float] = {}
 
 
 def _utc_now_iso() -> str:
@@ -49,7 +52,9 @@ def _normalize_percent(value: Any) -> Optional[float]:
 def _base_result() -> Dict[str, Any]:
     return {
         "telemetry_ok": False,
+        "telemetry_applicable": True,
         "source": "remote_glances",
+        "vm_state": None,
         "gpu_id": None,
         "gpu_name": None,
         "gpu_temp_c": None,
@@ -58,6 +63,45 @@ def _base_result() -> Dict[str, Any]:
         "error": None,
         "updated_at": _utc_now_iso(),
     }
+
+
+def _is_vm_known_not_running(vm_state: Optional[str]) -> bool:
+    if not isinstance(vm_state, str):
+        return False
+    lowered = vm_state.strip().lower()
+    if not lowered or lowered.startswith("error"):
+        return False
+    return lowered != "running"
+
+
+def _warning_throttled(key: str, message: str, *args: Any) -> None:
+    interval = max(0.0, float(settings.GPU_TELEMETRY_LOG_THROTTLE_SECONDS))
+    now = time.monotonic()
+    previous = _last_warning_at.get(key)
+    if previous is not None and now - previous < interval:
+        return
+    _last_warning_at[key] = now
+    logger.warning(message, *args)
+
+
+def _maybe_skip_when_vm_off(result: Dict[str, Any]) -> bool:
+    if not settings.GPU_TELEMETRY_SKIP_WHEN_VM_OFF:
+        return False
+
+    try:
+        vm_state = get_vm_status(settings.LLM_VM_ID)
+    except Exception as exc:
+        result["vm_state"] = f"ERROR: {exc}"
+        _warning_throttled("vm_state", "GPU telemetry VM state check failed: %s", exc)
+        return False
+
+    result["vm_state"] = vm_state
+    if not _is_vm_known_not_running(vm_state):
+        return False
+
+    result["telemetry_applicable"] = False
+    result["error"] = f"LLM VM is {str(vm_state).strip().lower()}; GPU telemetry skipped"
+    return True
 
 
 def normalize_glances_gpu_payload(
@@ -108,6 +152,9 @@ def normalize_glances_gpu_payload(
 
 def get_remote_glances_gpu_telemetry(include_raw: bool = False) -> Dict[str, Any]:
     result = _base_result()
+    if _maybe_skip_when_vm_off(result):
+        return result
+
     url = f"{settings.GLANCES_API_BASE_V4.rstrip('/')}/gpu"
 
     try:
@@ -116,11 +163,11 @@ def get_remote_glances_gpu_telemetry(include_raw: bool = False) -> Dict[str, Any
         payload = response.json()
     except requests.Timeout:
         result["error"] = "GPU telemetry request timed out"
-        logger.warning("GPU telemetry timeout from remote Glances")
+        _warning_throttled("timeout", "GPU telemetry timeout from remote Glances")
         return result
     except Exception as exc:
         result["error"] = f"GPU telemetry fetch failed: {exc}"
-        logger.warning("GPU telemetry fetch failed: %s", exc)
+        _warning_throttled("fetch_failed", "GPU telemetry fetch failed: %s", exc)
         return result
 
     normalized = normalize_glances_gpu_payload(
@@ -128,6 +175,7 @@ def get_remote_glances_gpu_telemetry(include_raw: bool = False) -> Dict[str, Any
         glances_gpu_id=settings.GLANCES_GPU_ID,
         include_raw=include_raw,
     )
+    normalized["vm_state"] = result.get("vm_state")
     return normalized
 
 

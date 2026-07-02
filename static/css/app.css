@@ -380,6 +380,11 @@ button:disabled {
   font-size: 0.8rem;
 }
 
+.service-action-status {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+}
+
 .watchdog-grid {
   display: grid;
   gap: 0.35rem;

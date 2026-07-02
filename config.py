@@ -117,10 +117,10 @@ class Settings:
         self.PROXMOX_TOKEN_SECRET = _secret("PROXMOX_TOKEN_SECRET", "")
 
         # VMID:t (screenshotin mukaan)
-        self.HA_VM_ID = _env_int("HA_VM_ID", 100)
-        self.LLM_VM_ID = _env_int("LLM_VM_ID", 101)          # llm-server VM
-        self.AGENT_VM_ID = _env_int("AGENT_VM_ID", 102)      # llm-agent VM
-        self.WINDOWS_VM_ID = _env_int("WINDOWS_VM_ID", 103)  # windows11 VM
+        self.HA_VM_ID = _conf_int("HA_VM_ID", 100)
+        self.LLM_VM_ID = _conf_int("LLM_VM_ID", 101)          # llm-server VM
+        self.AGENT_VM_ID = _conf_int("AGENT_VM_ID", 102)      # llm-agent VM
+        self.WINDOWS_VM_ID = _conf_int("WINDOWS_VM_ID", 103)  # windows11 VM
 
         # IP:t (informatiivisia; VM ohjaus tapahtuu Proxmox API:lla)
         self.PROXMOX_IP = _env("PROXMOX_IP", "192.168.8.31")
@@ -129,7 +129,7 @@ class Settings:
         self.WINDOWS_VM_IP = _env("WINDOWS_VM_IP", "192.168.8.34")
 
         # Varmistus: älä anna LLM-VM:n käynnistyä, jos Windows-VM on päällä (GPU)
-        self.ENFORCE_EXCLUSIVE_VMS = _env_bool("ENFORCE_EXCLUSIVE_VMS", True)
+        self.ENFORCE_EXCLUSIVE_VMS = _conf_bool("ENFORCE_EXCLUSIVE_VMS", True)
 
         # -------- iLO / IPMI (vain status, ei pakko) --------
         # (täytä llm_secrets.py:hin jos haluat sensorit mukaan)
@@ -139,10 +139,11 @@ class Settings:
             "ILO_PASSWORD",
             _secret("ILO_PASS", _env("ILO_PASSWORD", _env("ILO_PASS", ""))),
         )
-        self.ILO_SSH_PORT = _env_int("ILO_SSH_PORT", 22)
-        self.ILO_FAN_PATCH_INDEX = _env_int("ILO_FAN_PATCH_INDEX", 3)
-        self.ILO_SSH_TIMEOUT_SECONDS = _env_float("ILO_SSH_TIMEOUT_SECONDS", 5.0)
-        self.ILO_SSH_STRICT_HOSTKEY = _env_bool("ILO_SSH_STRICT_HOSTKEY", True)
+        self.ILO_SSH_PORT = _conf_int("ILO_SSH_PORT", 22)
+        self.ILO_FAN_PATCH_INDEX = _conf_int("ILO_FAN_PATCH_INDEX", 3)
+        self.ILO_SSH_TIMEOUT_SECONDS = _conf_float("ILO_SSH_TIMEOUT_SECONDS", 5.0)
+        self.ILO_SSH_STRICT_HOSTKEY = _conf_bool("ILO_SSH_STRICT_HOSTKEY", True)
+        self.ILO_SSHPASS_PATH = _conf("ILO_SSHPASS_PATH", "sshpass")
 
         # Backward-compatible aliases for existing IPMI health code
         self.ILO_IP = self.ILO_HOST
@@ -164,6 +165,8 @@ class Settings:
         )
         self.GLANCES_GPU_ID = _env("GLANCES_GPU_ID", "nvidia0")
         self.GLANCES_TIMEOUT_SECONDS = _env_float("GLANCES_TIMEOUT_SECONDS", 2.5)
+        self.GPU_TELEMETRY_SKIP_WHEN_VM_OFF = _conf_bool("GPU_TELEMETRY_SKIP_WHEN_VM_OFF", True)
+        self.GPU_TELEMETRY_LOG_THROTTLE_SECONDS = _conf_float("GPU_TELEMETRY_LOG_THROTTLE_SECONDS", 60.0)
         self.GPU_WATCHDOG_ENABLED = _env_bool(
             "GPU_WATCHDOG_ENABLED",
             _env_bool("WATCHDOG_ENABLED", False),

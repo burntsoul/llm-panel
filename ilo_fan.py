@@ -105,18 +105,20 @@ def set_ilo_fan_min(xx: int, patch_index: Optional[int] = None) -> Dict[str, Any
             error_type="config_missing",
         )
 
-    if not shutil.which("sshpass"):
+    sshpass_path = (settings.ILO_SSHPASS_PATH or "sshpass").strip()
+    sshpass_executable = sshpass_path if os.path.isabs(sshpass_path) else shutil.which(sshpass_path)
+    if not sshpass_executable or not os.path.exists(sshpass_executable):
         return _build_result(
             False,
             xx_int,
             "",
-            "sshpass not found in PATH",
+            f"{sshpass_path} not found",
             error_type="sshpass_missing",
         )
 
     remote_cmd = f"fan p {idx} min {xx_int}"
     cmd = [
-        "sshpass",
+        sshpass_executable,
         "-e",
         "ssh",
         "-p",
@@ -199,7 +201,7 @@ def set_ilo_fan_min(xx: int, patch_index: Optional[int] = None) -> Dict[str, Any
     safe_stderr = _sanitize_text(result.stderr, password) or ""
     safe_stdout = _sanitize_text(result.stdout, password) or ""
     error_type = _classify_ssh_error(safe_stderr, safe_stdout)
-    error = safe_stderr or safe_stdout or "iLO SSH command failed"
+    error = safe_stderr or safe_stdout or f"iLO SSH command failed with exit code {result.returncode}"
     logger.warning("iLO fan command failed: %s", error)
     return _build_result(
         False,
