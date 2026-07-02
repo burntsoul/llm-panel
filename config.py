@@ -5,7 +5,7 @@ import json
 import os
 from pathlib import Path
 
-from config_store import effective_gpu_telemetry_values
+from config_store import effective_gpu_fan_control_values, effective_gpu_telemetry_values
 
 try:
     import llm_secrets as secrets  # type: ignore
@@ -135,17 +135,21 @@ class Settings:
 
         # -------- iLO / IPMI (vain status, ei pakko) --------
         # (täytä llm_secrets.py:hin jos haluat sensorit mukaan)
-        self.ILO_HOST = _secret("ILO_HOST", _secret("ILO_IP", _env("ILO_HOST", _env("ILO_IP", ""))))
-        self.ILO_USER = _secret("ILO_USER", _env("ILO_USER", ""))
+        gpu_fan_control = effective_gpu_fan_control_values(
+            secrets_module=secrets,
+            ignore_local_errors=True,
+        )
+        self.ILO_HOST = str(gpu_fan_control["ilo_host"].value)
+        self.ILO_USER = str(gpu_fan_control["ilo_user"].value)
         self.ILO_PASSWORD = _secret(
             "ILO_PASSWORD",
             _secret("ILO_PASS", _env("ILO_PASSWORD", _env("ILO_PASS", ""))),
         )
-        self.ILO_SSH_PORT = _conf_int("ILO_SSH_PORT", 22)
-        self.ILO_FAN_PATCH_INDEX = _conf_int("ILO_FAN_PATCH_INDEX", 3)
-        self.ILO_SSH_TIMEOUT_SECONDS = _conf_float("ILO_SSH_TIMEOUT_SECONDS", 5.0)
-        self.ILO_SSH_STRICT_HOSTKEY = _conf_bool("ILO_SSH_STRICT_HOSTKEY", True)
-        self.ILO_SSHPASS_PATH = _conf("ILO_SSHPASS_PATH", "sshpass")
+        self.ILO_SSH_PORT = int(gpu_fan_control["ilo_ssh_port"].value)
+        self.ILO_FAN_PATCH_INDEX = int(gpu_fan_control["ilo_fan_patch_index"].value)
+        self.ILO_SSH_TIMEOUT_SECONDS = float(gpu_fan_control["ilo_ssh_timeout_seconds"].value)
+        self.ILO_SSH_STRICT_HOSTKEY = bool(gpu_fan_control["ilo_ssh_strict_hostkey"].value)
+        self.ILO_SSHPASS_PATH = str(gpu_fan_control["ilo_sshpass_path"].value)
 
         # Backward-compatible aliases for existing IPMI health code
         self.ILO_IP = self.ILO_HOST

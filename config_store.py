@@ -31,8 +31,19 @@ class GpuTelemetryConfig(BaseModel):
     glances_gpu_id: str = "nvidia0"
 
 
+class GpuFanControlConfig(BaseModel):
+    ilo_host: str = ""
+    ilo_user: str = ""
+    ilo_ssh_port: int = Field(default=22, ge=1, le=65535)
+    ilo_fan_patch_index: int = Field(default=3, ge=0)
+    ilo_ssh_timeout_seconds: float = Field(default=5.0, gt=0.0)
+    ilo_ssh_strict_hostkey: bool = True
+    ilo_sshpass_path: str = "sshpass"
+
+
 class GpuConfig(BaseModel):
     telemetry: GpuTelemetryConfig = Field(default_factory=GpuTelemetryConfig)
+    fan_control: GpuFanControlConfig = Field(default_factory=GpuFanControlConfig)
 
 
 class LocalConfig(BaseModel):
@@ -71,6 +82,10 @@ def _coerce_float(value: Any) -> float:
     return float(value)
 
 
+def _coerce_int(value: Any) -> int:
+    return int(value)
+
+
 def _coerce_str(value: Any) -> str:
     if value is None:
         return ""
@@ -106,6 +121,60 @@ GPU_TELEMETRY_FIELDS = {
         "env_name": "GLANCES_GPU_ID",
         "coerce": _coerce_str,
         "label": "Glances GPU ID",
+        "type": "text",
+    },
+}
+
+
+GPU_FAN_CONTROL_FIELDS = {
+    "ilo_host": {
+        "legacy_names": ("ILO_HOST", "ILO_IP"),
+        "env_names": ("ILO_HOST", "ILO_IP"),
+        "coerce": _coerce_str,
+        "label": "iLO host",
+        "type": "text",
+    },
+    "ilo_user": {
+        "legacy_names": ("ILO_USER",),
+        "env_names": ("ILO_USER",),
+        "coerce": _coerce_str,
+        "label": "iLO user",
+        "type": "text",
+    },
+    "ilo_ssh_port": {
+        "legacy_names": ("ILO_SSH_PORT",),
+        "env_names": ("ILO_SSH_PORT",),
+        "coerce": _coerce_int,
+        "label": "SSH port",
+        "type": "number",
+    },
+    "ilo_fan_patch_index": {
+        "legacy_names": ("ILO_FAN_PATCH_INDEX",),
+        "env_names": ("ILO_FAN_PATCH_INDEX",),
+        "coerce": _coerce_int,
+        "label": "Fan patch index",
+        "type": "number",
+    },
+    "ilo_ssh_timeout_seconds": {
+        "legacy_names": ("ILO_SSH_TIMEOUT_SECONDS",),
+        "env_names": ("ILO_SSH_TIMEOUT_SECONDS",),
+        "coerce": _coerce_float,
+        "label": "SSH timeout",
+        "type": "number",
+        "unit": "s",
+    },
+    "ilo_ssh_strict_hostkey": {
+        "legacy_names": ("ILO_SSH_STRICT_HOSTKEY",),
+        "env_names": ("ILO_SSH_STRICT_HOSTKEY",),
+        "coerce": _coerce_bool,
+        "label": "Strict host key",
+        "type": "boolean",
+    },
+    "ilo_sshpass_path": {
+        "legacy_names": ("ILO_SSHPASS_PATH",),
+        "env_names": ("ILO_SSHPASS_PATH",),
+        "coerce": _coerce_str,
+        "label": "sshpass path",
         "type": "text",
     },
 }
@@ -177,6 +246,35 @@ def update_gpu_telemetry_config(
     return telemetry
 
 
+def update_gpu_fan_control_config(
+    updates: Mapping[str, Any],
+    path: Path = LOCAL_CONFIG_PATH,
+) -> GpuFanControlConfig:
+    allowed = set(GPU_FAN_CONTROL_FIELDS)
+    unknown = sorted(set(updates) - allowed)
+    if unknown:
+        raise ConfigValidationError(
+            [{"loc": ("gpu", "fan_control", key), "msg": "unknown setting", "type": "value_error.unknown"} for key in unknown]
+        )
+
+    raw = _read_local_raw(path)
+    current = LocalConfig.model_validate(raw)
+    merged = current.gpu.fan_control.model_dump()
+    merged.update(dict(updates))
+
+    try:
+        fan_control = GpuFanControlConfig.model_validate(merged)
+    except ValidationError as exc:
+        raise ConfigValidationError(exc.errors()) from exc
+
+    raw.setdefault("gpu", {})
+    if not isinstance(raw["gpu"], dict):
+        raw["gpu"] = {}
+    raw["gpu"]["fan_control"] = fan_control.model_dump(mode="json")
+    _dump_local_raw(raw, path)
+    return fan_control
+
+
 def _resolve_gpu_telemetry_field(
     field_name: str,
     local: GpuTelemetryConfig,
@@ -206,6 +304,52 @@ def _resolve_gpu_telemetry_field(
         source = "llm_secrets.py"
 
     return SettingValue(key=legacy_name, value=value, source=source)
+
+
+def _first_existing_legacy(secrets_module: Any, names: tuple[str, ...]) -> tuple[bool, str, Any]:
+    for name in names:
+        if _legacy_has(secrets_module, name):
+            return True, name, _legacy_value(secrets_module, name)
+    return False, "", None
+
+
+def _first_existing_env(environ: Mapping[str, str], names: tuple[str, ...]) -> tuple[bool, str, str]:
+    for name in names:
+        if name in environ:
+            return True, name, environ[name]
+    return False, "", ""
+
+
+def _resolve_gpu_fan_control_field(
+    field_name: str,
+    local: GpuFanControlConfig,
+    local_has_field: bool,
+    secrets_module: Any,
+    environ: Mapping[str, str],
+) -> SettingValue:
+    meta = GPU_FAN_CONTROL_FIELDS[field_name]
+    legacy_names = meta["legacy_names"]
+    env_names = meta["env_names"]
+    coerce = meta["coerce"]
+
+    value = getattr(GpuFanControlConfig(), field_name)
+    source = "default"
+
+    if local_has_field:
+        value = getattr(local, field_name)
+        source = "config/local.json"
+
+    has_env, env_name, env_raw = _first_existing_env(environ, env_names)
+    if has_env:
+        value = coerce(env_raw)
+        source = "env"
+
+    has_legacy, legacy_name, legacy_raw = _first_existing_legacy(secrets_module, legacy_names)
+    if has_legacy:
+        value = coerce(legacy_raw)
+        source = "llm_secrets.py"
+
+    return SettingValue(key=legacy_name or env_name or legacy_names[0], value=value, source=source)
 
 
 def effective_gpu_telemetry_values(
@@ -238,6 +382,36 @@ def effective_gpu_telemetry_values(
     }
 
 
+def effective_gpu_fan_control_values(
+    secrets_module: Any = None,
+    environ: Optional[Mapping[str, str]] = None,
+    path: Path = LOCAL_CONFIG_PATH,
+    ignore_local_errors: bool = False,
+) -> dict[str, SettingValue]:
+    env = environ if environ is not None else os.environ
+    try:
+        raw = _read_local_raw(path)
+    except ConfigStoreError:
+        if not ignore_local_errors:
+            raise
+        raw = {}
+    local = LocalConfig.model_validate(raw).gpu.fan_control
+    raw_gpu = raw.get("gpu", {})
+    raw_fan_control = raw_gpu.get("fan_control", {}) if isinstance(raw_gpu, dict) else {}
+    if not isinstance(raw_fan_control, dict):
+        raw_fan_control = {}
+    return {
+        field_name: _resolve_gpu_fan_control_field(
+            field_name,
+            local,
+            field_name in raw_fan_control,
+            secrets_module,
+            env,
+        )
+        for field_name in GPU_FAN_CONTROL_FIELDS
+    }
+
+
 def gpu_telemetry_fields_for_api(
     secrets_module: Any = None,
     environ: Optional[Mapping[str, str]] = None,
@@ -259,4 +433,44 @@ def gpu_telemetry_fields_for_api(
         if "unit" in meta:
             field["unit"] = meta["unit"]
         fields.append(field)
+    return fields
+
+
+def gpu_fan_control_fields_for_api(
+    secrets_module: Any = None,
+    environ: Optional[Mapping[str, str]] = None,
+    path: Path = LOCAL_CONFIG_PATH,
+) -> list[dict[str, Any]]:
+    values = effective_gpu_fan_control_values(secrets_module=secrets_module, environ=environ, path=path)
+    fields: list[dict[str, Any]] = []
+    for field_name, meta in GPU_FAN_CONTROL_FIELDS.items():
+        resolved = values[field_name]
+        field = {
+            "key": resolved.key,
+            "config_key": field_name,
+            "label": meta["label"],
+            "value": resolved.value,
+            "type": meta["type"],
+            "source": resolved.source,
+            "editable": resolved.source in ("default", "config/local.json"),
+        }
+        if "unit" in meta:
+            field["unit"] = meta["unit"]
+        fields.append(field)
+
+    fields.append(
+        {
+            "key": "ILO_PASSWORD",
+            "label": "iLO password",
+            "value": "configured"
+            if _legacy_has(secrets_module, "ILO_PASSWORD")
+            or _legacy_has(secrets_module, "ILO_PASS")
+            or "ILO_PASSWORD" in (environ if environ is not None else os.environ)
+            or "ILO_PASS" in (environ if environ is not None else os.environ)
+            else "missing",
+            "type": "secret-status",
+            "source": "llm_secrets.py/env",
+            "editable": False,
+        }
+    )
     return fields

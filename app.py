@@ -16,8 +16,11 @@ from config import secrets as config_secrets
 from config_store import (
     ConfigStoreError,
     ConfigValidationError,
+    effective_gpu_fan_control_values,
     effective_gpu_telemetry_values,
+    gpu_fan_control_fields_for_api,
     gpu_telemetry_fields_for_api,
+    update_gpu_fan_control_config,
     update_gpu_telemetry_config,
 )
 from lo100 import get_lo100_health_and_temp
@@ -1201,6 +1204,14 @@ def api_settings_effective():
         gpu_telemetry_fields = []
         gpu_telemetry_error = str(exc)
         gpu_telemetry_editable = False
+    gpu_fan_control_error = None
+    try:
+        gpu_fan_control_fields = gpu_fan_control_fields_for_api(secrets_module=config_secrets)
+        gpu_fan_control_editable = True
+    except ConfigStoreError as exc:
+        gpu_fan_control_fields = []
+        gpu_fan_control_error = str(exc)
+        gpu_fan_control_editable = False
 
     return {
         "ok": True,
@@ -1236,17 +1247,21 @@ def api_settings_effective():
                 "fields": gpu_telemetry_fields,
             },
             "gpu": {
-                "title": "GPU fan control",
+                "title": "GPU watchdog overview",
                 "fields": [
                     {"key": "GPU_TELEMETRY_PROVIDER", "label": "Telemetry provider", "value": settings.GPU_TELEMETRY_PROVIDER, "type": "text", "source": "config", "editable": False},
                     {"key": "GLANCES_API_BASE_V4", "label": "Glances API v4", "value": settings.GLANCES_API_BASE_V4, "type": "url", "source": "config", "editable": False},
                     {"key": "WATCHDOG_ENABLED", "label": "Watchdog enabled by default", "value": settings.WATCHDOG_ENABLED, "type": "boolean", "source": "config", "editable": False},
                     {"key": "WATCHDOG_POLL_SECONDS", "label": "Watchdog poll", "value": settings.WATCHDOG_POLL_SECONDS, "type": "number", "unit": "s", "source": "config", "editable": False},
-                    {"key": "ILO_HOST", "label": "iLO host", "value": settings.ILO_HOST or "missing", "type": "text", "source": "llm_secrets.py", "editable": False},
-                    {"key": "ILO_USER", "label": "iLO user", "value": settings.ILO_USER or "missing", "type": "text", "source": "llm_secrets.py", "editable": False},
-                    {"key": "ILO_PASSWORD", "label": "iLO password", "value": "configured" if settings.ILO_PASSWORD else "missing", "type": "secret-status", "source": "llm_secrets.py", "editable": False},
-                    {"key": "ILO_SSH_STRICT_HOSTKEY", "label": "Strict host key", "value": settings.ILO_SSH_STRICT_HOSTKEY, "type": "boolean", "source": "config", "editable": False},
                 ],
+            },
+            "gpu_fan_control": {
+                "title": "GPU fan control",
+                "editable": gpu_fan_control_editable,
+                "advanced": True,
+                "save_endpoint": "/api/settings/gpu/fan-control",
+                "error": gpu_fan_control_error,
+                "fields": gpu_fan_control_fields,
             },
         },
     }
@@ -1258,6 +1273,18 @@ def _refresh_gpu_telemetry_settings_from_store() -> None:
     settings.GLANCES_TIMEOUT_SECONDS = float(effective["glances_timeout_seconds"].value)
     settings.GPU_TELEMETRY_SKIP_WHEN_VM_OFF = bool(effective["skip_when_vm_off"].value)
     settings.GPU_TELEMETRY_LOG_THROTTLE_SECONDS = float(effective["log_throttle_seconds"].value)
+
+
+def _refresh_gpu_fan_control_settings_from_store() -> None:
+    effective = effective_gpu_fan_control_values(secrets_module=config_secrets)
+    settings.ILO_HOST = str(effective["ilo_host"].value)
+    settings.ILO_USER = str(effective["ilo_user"].value)
+    settings.ILO_SSH_PORT = int(effective["ilo_ssh_port"].value)
+    settings.ILO_FAN_PATCH_INDEX = int(effective["ilo_fan_patch_index"].value)
+    settings.ILO_SSH_TIMEOUT_SECONDS = float(effective["ilo_ssh_timeout_seconds"].value)
+    settings.ILO_SSH_STRICT_HOSTKEY = bool(effective["ilo_ssh_strict_hostkey"].value)
+    settings.ILO_SSHPASS_PATH = str(effective["ilo_sshpass_path"].value)
+    settings.ILO_IP = settings.ILO_HOST
 
 
 @app.put("/api/settings/gpu/telemetry")
@@ -1290,6 +1317,40 @@ async def api_settings_update_gpu_telemetry(request: Request):
             "advanced": True,
             "save_endpoint": "/api/settings/gpu/telemetry",
             "fields": gpu_telemetry_fields_for_api(secrets_module=config_secrets),
+        },
+    }
+
+
+@app.put("/api/settings/gpu/fan-control")
+async def api_settings_update_gpu_fan_control(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail={"error": "invalid JSON body"})
+
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail={"error": "body must be a JSON object"})
+
+    values = body.get("values", body)
+    if not isinstance(values, dict):
+        raise HTTPException(status_code=400, detail={"error": "values must be a JSON object"})
+
+    try:
+        update_gpu_fan_control_config(values)
+        _refresh_gpu_fan_control_settings_from_store()
+    except ConfigValidationError as exc:
+        raise HTTPException(status_code=400, detail={"error": "validation failed", "fields": exc.errors})
+    except ConfigStoreError as exc:
+        raise HTTPException(status_code=400, detail={"error": str(exc)})
+
+    return {
+        "ok": True,
+        "section": {
+            "title": "GPU fan control",
+            "editable": True,
+            "advanced": True,
+            "save_endpoint": "/api/settings/gpu/fan-control",
+            "fields": gpu_fan_control_fields_for_api(secrets_module=config_secrets),
         },
     }
 

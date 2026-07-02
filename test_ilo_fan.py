@@ -20,7 +20,7 @@ class TestIloFan(unittest.TestCase):
     @patch("ilo_fan.shutil.which")
     def test_sshpass_missing(self, mock_which):
         mock_which.return_value = None
-        with patch.object(settings, "ILO_HOST", "192.168.8.35"), patch.object(settings, "ILO_USER", "Administrator"), patch.object(settings, "ILO_PASSWORD", "secret"):
+        with patch.object(settings, "ILO_HOST", "192.168.8.35"), patch.object(settings, "ILO_USER", "Administrator"), patch.object(settings, "ILO_PASSWORD", "secret"), patch.object(settings, "ILO_SSHPASS_PATH", "sshpass"):
             result = set_ilo_fan_min(150)
         self.assertFalse(result["ok"])
         self.assertIn("sshpass", result["error"])
@@ -52,12 +52,12 @@ class TestIloFan(unittest.TestCase):
         proc.stderr = ""
         mock_run.return_value = proc
 
-        with patch.object(settings, "ILO_HOST", "192.168.8.35"), patch.object(settings, "ILO_USER", "Administrator"), patch.object(settings, "ILO_PASSWORD", "my-password"), patch.object(settings, "ILO_FAN_PATCH_INDEX", 3):
+        with patch.object(settings, "ILO_HOST", "192.168.8.35"), patch.object(settings, "ILO_USER", "Administrator"), patch.object(settings, "ILO_PASSWORD", "my-password"), patch.object(settings, "ILO_FAN_PATCH_INDEX", 3), patch.object(settings, "ILO_SSHPASS_PATH", "sshpass"):
             set_ilo_fan_min(120)
 
         args, kwargs = mock_run.call_args
         self.assertIsInstance(args[0], list)
-        self.assertEqual(args[0][0], "sshpass")
+        self.assertEqual(args[0][0], "/usr/bin/sshpass")
         self.assertEqual(args[0][1], "-e")
         self.assertFalse(kwargs["shell"])
         self.assertIn("SSHPASS", kwargs["env"])

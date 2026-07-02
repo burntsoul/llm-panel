@@ -1,5 +1,14 @@
 {
   "gpu": {
+    "fan_control": {
+      "ilo_fan_patch_index": 3,
+      "ilo_host": "",
+      "ilo_ssh_port": 22,
+      "ilo_ssh_strict_hostkey": true,
+      "ilo_ssh_timeout_seconds": 5.0,
+      "ilo_sshpass_path": "sshpass",
+      "ilo_user": ""
+    },
     "telemetry": {
       "glances_gpu_id": "nvidia0",
       "glances_timeout_seconds": 2.5,

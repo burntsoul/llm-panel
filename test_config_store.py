@@ -9,8 +9,11 @@ from types import SimpleNamespace
 from config_store import (
     ConfigStoreError,
     ConfigValidationError,
+    effective_gpu_fan_control_values,
     effective_gpu_telemetry_values,
+    gpu_fan_control_fields_for_api,
     load_local_config,
+    update_gpu_fan_control_config,
     update_gpu_telemetry_config,
 )
 
@@ -30,6 +33,9 @@ class TestConfigStore(unittest.TestCase):
         self.assertEqual(config.gpu.telemetry.log_throttle_seconds, 60.0)
         self.assertEqual(config.gpu.telemetry.glances_timeout_seconds, 2.5)
         self.assertEqual(config.gpu.telemetry.glances_gpu_id, "nvidia0")
+        self.assertEqual(config.gpu.fan_control.ilo_ssh_port, 22)
+        self.assertEqual(config.gpu.fan_control.ilo_fan_patch_index, 3)
+        self.assertEqual(config.gpu.fan_control.ilo_sshpass_path, "sshpass")
 
     def test_json_overrides_defaults(self):
         path = self.temp_path()
@@ -128,6 +134,93 @@ class TestConfigStore(unittest.TestCase):
 
         with self.assertRaises(ConfigValidationError):
             update_gpu_telemetry_config({"not_a_setting": True}, path=path)
+
+    def test_gpu_fan_control_json_overrides_defaults(self):
+        path = self.temp_path()
+        path.write_text(
+            json.dumps(
+                {
+                    "gpu": {
+                        "fan_control": {
+                            "ilo_host": "192.168.8.35",
+                            "ilo_user": "Administrator",
+                            "ilo_ssh_port": 2222,
+                            "ilo_fan_patch_index": 4,
+                            "ilo_ssh_timeout_seconds": 8.5,
+                            "ilo_ssh_strict_hostkey": False,
+                            "ilo_sshpass_path": "/usr/bin/sshpass",
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        values = effective_gpu_fan_control_values(path=path, environ={})
+
+        self.assertEqual(values["ilo_host"].value, "192.168.8.35")
+        self.assertEqual(values["ilo_host"].source, "config/local.json")
+        self.assertEqual(values["ilo_user"].value, "Administrator")
+        self.assertEqual(values["ilo_ssh_port"].value, 2222)
+        self.assertEqual(values["ilo_fan_patch_index"].value, 4)
+        self.assertEqual(values["ilo_ssh_timeout_seconds"].value, 8.5)
+        self.assertFalse(values["ilo_ssh_strict_hostkey"].value)
+        self.assertEqual(values["ilo_sshpass_path"].value, "/usr/bin/sshpass")
+
+    def test_gpu_fan_control_env_overrides_json(self):
+        path = self.temp_path()
+        path.write_text(
+            json.dumps({"gpu": {"fan_control": {"ilo_ssh_port": 2222}}}),
+            encoding="utf-8",
+        )
+
+        values = effective_gpu_fan_control_values(path=path, environ={"ILO_SSH_PORT": "2200"})
+
+        self.assertEqual(values["ilo_ssh_port"].value, 2200)
+        self.assertEqual(values["ilo_ssh_port"].source, "env")
+
+    def test_gpu_fan_control_legacy_secrets_override_env(self):
+        path = self.temp_path()
+        secrets = SimpleNamespace(ILO_HOST="192.168.8.35")
+
+        values = effective_gpu_fan_control_values(
+            path=path,
+            environ={"ILO_HOST": "192.168.8.36"},
+            secrets_module=secrets,
+        )
+
+        self.assertEqual(values["ilo_host"].value, "192.168.8.35")
+        self.assertEqual(values["ilo_host"].source, "llm_secrets.py")
+
+    def test_update_gpu_fan_control_preserves_unrelated_config(self):
+        path = self.temp_path()
+        path.write_text(
+            json.dumps(
+                {
+                    "gpu": {"telemetry": {"log_throttle_seconds": 30}},
+                    "future": {"kept": True},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        update_gpu_fan_control_config({"ilo_ssh_strict_hostkey": False}, path=path)
+        raw = json.loads(path.read_text(encoding="utf-8"))
+
+        self.assertEqual(raw["future"], {"kept": True})
+        self.assertEqual(raw["gpu"]["telemetry"], {"log_throttle_seconds": 30})
+        self.assertFalse(raw["gpu"]["fan_control"]["ilo_ssh_strict_hostkey"])
+
+    def test_gpu_fan_control_secret_status_does_not_expose_password(self):
+        fields = gpu_fan_control_fields_for_api(
+            secrets_module=SimpleNamespace(ILO_PASSWORD="super-secret-password"),
+            environ={},
+            path=self.temp_path(),
+        )
+        encoded = json.dumps(fields)
+
+        self.assertIn("configured", encoded)
+        self.assertNotIn("super-secret-password", encoded)
 
 
 if __name__ == "__main__":
