@@ -18,10 +18,13 @@ from config_store import (
     ConfigValidationError,
     effective_gpu_fan_control_values,
     effective_gpu_telemetry_values,
+    effective_gpu_watchdog_curve_values,
     gpu_fan_control_fields_for_api,
     gpu_telemetry_fields_for_api,
+    gpu_watchdog_curve_fields_for_api,
     update_gpu_fan_control_config,
     update_gpu_telemetry_config,
+    update_gpu_watchdog_curve_config,
 )
 from lo100 import get_lo100_health_and_temp
 from proxmox import get_vm_status, start_vm, shutdown_vm, stop_vm
@@ -1212,6 +1215,14 @@ def api_settings_effective():
         gpu_fan_control_fields = []
         gpu_fan_control_error = str(exc)
         gpu_fan_control_editable = False
+    gpu_watchdog_curve_error = None
+    try:
+        gpu_watchdog_curve_fields = gpu_watchdog_curve_fields_for_api(secrets_module=config_secrets)
+        gpu_watchdog_curve_editable = True
+    except ConfigStoreError as exc:
+        gpu_watchdog_curve_fields = []
+        gpu_watchdog_curve_error = str(exc)
+        gpu_watchdog_curve_editable = False
 
     return {
         "ok": True,
@@ -1263,6 +1274,14 @@ def api_settings_effective():
                 "error": gpu_fan_control_error,
                 "fields": gpu_fan_control_fields,
             },
+            "gpu_watchdog_curve": {
+                "title": "GPU watchdog curve",
+                "editable": gpu_watchdog_curve_editable,
+                "advanced": True,
+                "save_endpoint": "/api/settings/gpu/watchdog-curve",
+                "error": gpu_watchdog_curve_error,
+                "fields": gpu_watchdog_curve_fields,
+            },
         },
     }
 
@@ -1285,6 +1304,30 @@ def _refresh_gpu_fan_control_settings_from_store() -> None:
     settings.ILO_SSH_STRICT_HOSTKEY = bool(effective["ilo_ssh_strict_hostkey"].value)
     settings.ILO_SSHPASS_PATH = str(effective["ilo_sshpass_path"].value)
     settings.ILO_IP = settings.ILO_HOST
+
+
+def _refresh_gpu_watchdog_curve_settings_from_store() -> None:
+    effective = effective_gpu_watchdog_curve_values(secrets_module=config_secrets)
+    settings.GPU_WATCHDOG_POLL_SECONDS = float(effective["poll_seconds"].value)
+    settings.GPU_WATCHDOG_TARGET_TEMP_C = float(effective["target_temp_c"].value)
+    settings.GPU_WATCHDOG_MIN_FAN_XX = int(effective["min_fan_xx"].value)
+    settings.GPU_WATCHDOG_MAX_FAN_XX = int(effective["max_fan_xx"].value)
+    settings.GPU_WATCHDOG_PI_KP = float(effective["kp"].value)
+    settings.GPU_WATCHDOG_PI_KI = float(effective["ki"].value)
+    settings.GPU_WATCHDOG_PI_INTEGRAL_CLAMP = float(effective["integral_clamp"].value)
+    settings.GPU_WATCHDOG_SMOOTHING_ALPHA = float(effective["smoothing_alpha"].value)
+    settings.GPU_WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS = float(effective["command_min_interval_seconds"].value)
+    settings.GPU_WATCHDOG_COMMAND_MIN_DELTA_XX = int(effective["command_min_delta_xx"].value)
+    settings.GPU_WATCHDOG_MAX_STEP_UP_XX = int(effective["max_step_up_xx"].value)
+    settings.GPU_WATCHDOG_MAX_STEP_DOWN_XX = int(effective["max_step_down_xx"].value)
+    settings.GPU_WATCHDOG_EMERGENCY_TEMP_C = float(effective["emergency_temp_c"].value)
+    settings.GPU_WATCHDOG_EMERGENCY_FAN_XX = int(effective["emergency_fan_xx"].value)
+    settings.GPU_WATCHDOG_FAILSAFE_FAN_MIN_XX = int(effective["failsafe_fan_xx"].value)
+    settings.GPU_WATCHDOG_TELEMETRY_STALE_SECONDS = float(effective["telemetry_stale_seconds"].value)
+    settings.WATCHDOG_POLL_SECONDS = settings.GPU_WATCHDOG_POLL_SECONDS
+    settings.WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS = settings.GPU_WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS
+    settings.WATCHDOG_FAILSAFE_FAN_MIN_XX = settings.GPU_WATCHDOG_FAILSAFE_FAN_MIN_XX
+    settings.WATCHDOG_TELEMETRY_STALE_SECONDS = settings.GPU_WATCHDOG_TELEMETRY_STALE_SECONDS
 
 
 @app.put("/api/settings/gpu/telemetry")
@@ -1338,6 +1381,9 @@ async def api_settings_update_gpu_fan_control(request: Request):
     try:
         update_gpu_fan_control_config(values)
         _refresh_gpu_fan_control_settings_from_store()
+        watchdog = getattr(app.state, "gpu_watchdog", None)
+        if watchdog is not None:
+            watchdog.reload_config(reset_controller=False)
     except ConfigValidationError as exc:
         raise HTTPException(status_code=400, detail={"error": "validation failed", "fields": exc.errors})
     except ConfigStoreError as exc:
@@ -1351,6 +1397,43 @@ async def api_settings_update_gpu_fan_control(request: Request):
             "advanced": True,
             "save_endpoint": "/api/settings/gpu/fan-control",
             "fields": gpu_fan_control_fields_for_api(secrets_module=config_secrets),
+        },
+    }
+
+
+@app.put("/api/settings/gpu/watchdog-curve")
+async def api_settings_update_gpu_watchdog_curve(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail={"error": "invalid JSON body"})
+
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail={"error": "body must be a JSON object"})
+
+    values = body.get("values", body)
+    if not isinstance(values, dict):
+        raise HTTPException(status_code=400, detail={"error": "values must be a JSON object"})
+
+    try:
+        update_gpu_watchdog_curve_config(values)
+        _refresh_gpu_watchdog_curve_settings_from_store()
+        watchdog = getattr(app.state, "gpu_watchdog", None)
+        if watchdog is not None:
+            watchdog.reload_config(reset_controller=True)
+    except ConfigValidationError as exc:
+        raise HTTPException(status_code=400, detail={"error": "validation failed", "fields": exc.errors})
+    except ConfigStoreError as exc:
+        raise HTTPException(status_code=400, detail={"error": str(exc)})
+
+    return {
+        "ok": True,
+        "section": {
+            "title": "GPU watchdog curve",
+            "editable": True,
+            "advanced": True,
+            "save_endpoint": "/api/settings/gpu/watchdog-curve",
+            "fields": gpu_watchdog_curve_fields_for_api(secrets_module=config_secrets),
         },
     }
 

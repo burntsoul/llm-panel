@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 
 CONFIG_DIR = Path(__file__).with_name("config")
@@ -41,9 +41,39 @@ class GpuFanControlConfig(BaseModel):
     ilo_sshpass_path: str = "sshpass"
 
 
+class GpuWatchdogCurveConfig(BaseModel):
+    poll_seconds: float = Field(default=5.0, gt=0.0)
+    target_temp_c: float = 72.0
+    min_fan_xx: int = Field(default=40, ge=0, le=255)
+    max_fan_xx: int = Field(default=230, ge=0, le=255)
+    kp: float = Field(default=14.0, ge=0.0)
+    ki: float = Field(default=0.08, ge=0.0)
+    integral_clamp: float = Field(default=800.0, ge=0.0)
+    smoothing_alpha: float = Field(default=0.25, ge=0.0, le=1.0)
+    command_min_interval_seconds: float = Field(default=20.0, ge=0.0)
+    command_min_delta_xx: int = Field(default=5, ge=0, le=255)
+    max_step_up_xx: int = Field(default=20, ge=1, le=255)
+    max_step_down_xx: int = Field(default=10, ge=1, le=255)
+    emergency_temp_c: float = 84.0
+    emergency_fan_xx: int = Field(default=230, ge=0, le=255)
+    failsafe_fan_xx: int = Field(default=190, ge=0, le=255)
+    telemetry_stale_seconds: float = Field(default=15.0, gt=0.0)
+
+    @model_validator(mode="after")
+    def _validate_ranges(self) -> "GpuWatchdogCurveConfig":
+        if self.max_fan_xx < self.min_fan_xx:
+            raise ValueError("max_fan_xx must be greater than or equal to min_fan_xx")
+        if self.emergency_fan_xx < self.min_fan_xx:
+            raise ValueError("emergency_fan_xx must be greater than or equal to min_fan_xx")
+        if self.failsafe_fan_xx < self.min_fan_xx:
+            raise ValueError("failsafe_fan_xx must be greater than or equal to min_fan_xx")
+        return self
+
+
 class GpuConfig(BaseModel):
     telemetry: GpuTelemetryConfig = Field(default_factory=GpuTelemetryConfig)
     fan_control: GpuFanControlConfig = Field(default_factory=GpuFanControlConfig)
+    watchdog_curve: GpuWatchdogCurveConfig = Field(default_factory=GpuWatchdogCurveConfig)
 
 
 class LocalConfig(BaseModel):
@@ -180,6 +210,127 @@ GPU_FAN_CONTROL_FIELDS = {
 }
 
 
+GPU_WATCHDOG_CURVE_FIELDS = {
+    "poll_seconds": {
+        "legacy_names": ("GPU_WATCHDOG_POLL_SECONDS", "WATCHDOG_POLL_SECONDS"),
+        "env_names": ("GPU_WATCHDOG_POLL_SECONDS", "WATCHDOG_POLL_SECONDS"),
+        "coerce": _coerce_float,
+        "label": "Poll interval",
+        "type": "number",
+        "unit": "s",
+    },
+    "target_temp_c": {
+        "legacy_names": ("GPU_WATCHDOG_TARGET_TEMP_C", "WATCHDOG_TARGET_TEMP_C"),
+        "env_names": ("GPU_WATCHDOG_TARGET_TEMP_C", "WATCHDOG_TARGET_TEMP_C"),
+        "coerce": _coerce_float,
+        "label": "Target temperature",
+        "type": "number",
+        "unit": "C",
+    },
+    "min_fan_xx": {
+        "legacy_names": ("GPU_WATCHDOG_MIN_FAN_XX", "WATCHDOG_MIN_FAN_XX"),
+        "env_names": ("GPU_WATCHDOG_MIN_FAN_XX", "WATCHDOG_MIN_FAN_XX"),
+        "coerce": _coerce_int,
+        "label": "Minimum fan",
+        "type": "number",
+    },
+    "max_fan_xx": {
+        "legacy_names": ("GPU_WATCHDOG_MAX_FAN_XX", "WATCHDOG_MAX_FAN_XX"),
+        "env_names": ("GPU_WATCHDOG_MAX_FAN_XX", "WATCHDOG_MAX_FAN_XX"),
+        "coerce": _coerce_int,
+        "label": "Maximum fan",
+        "type": "number",
+    },
+    "kp": {
+        "legacy_names": ("GPU_WATCHDOG_PI_KP", "WATCHDOG_PI_KP"),
+        "env_names": ("GPU_WATCHDOG_PI_KP", "WATCHDOG_PI_KP"),
+        "coerce": _coerce_float,
+        "label": "PI proportional gain",
+        "type": "number",
+    },
+    "ki": {
+        "legacy_names": ("GPU_WATCHDOG_PI_KI", "WATCHDOG_PI_KI"),
+        "env_names": ("GPU_WATCHDOG_PI_KI", "WATCHDOG_PI_KI"),
+        "coerce": _coerce_float,
+        "label": "PI integral gain",
+        "type": "number",
+    },
+    "integral_clamp": {
+        "legacy_names": ("GPU_WATCHDOG_PI_INTEGRAL_CLAMP", "WATCHDOG_PI_INTEGRAL_CLAMP"),
+        "env_names": ("GPU_WATCHDOG_PI_INTEGRAL_CLAMP", "WATCHDOG_PI_INTEGRAL_CLAMP"),
+        "coerce": _coerce_float,
+        "label": "Integral clamp",
+        "type": "number",
+    },
+    "smoothing_alpha": {
+        "legacy_names": ("GPU_WATCHDOG_SMOOTHING_ALPHA", "WATCHDOG_SMOOTHING_ALPHA"),
+        "env_names": ("GPU_WATCHDOG_SMOOTHING_ALPHA", "WATCHDOG_SMOOTHING_ALPHA"),
+        "coerce": _coerce_float,
+        "label": "Smoothing alpha",
+        "type": "number",
+    },
+    "command_min_interval_seconds": {
+        "legacy_names": ("GPU_WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS", "WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS"),
+        "env_names": ("GPU_WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS", "WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS"),
+        "coerce": _coerce_float,
+        "label": "Command interval",
+        "type": "number",
+        "unit": "s",
+    },
+    "command_min_delta_xx": {
+        "legacy_names": ("GPU_WATCHDOG_COMMAND_MIN_DELTA_XX", "WATCHDOG_COMMAND_MIN_DELTA_XX"),
+        "env_names": ("GPU_WATCHDOG_COMMAND_MIN_DELTA_XX", "WATCHDOG_COMMAND_MIN_DELTA_XX"),
+        "coerce": _coerce_int,
+        "label": "Command delta",
+        "type": "number",
+    },
+    "max_step_up_xx": {
+        "legacy_names": ("GPU_WATCHDOG_MAX_STEP_UP_XX", "WATCHDOG_MAX_STEP_UP_XX"),
+        "env_names": ("GPU_WATCHDOG_MAX_STEP_UP_XX", "WATCHDOG_MAX_STEP_UP_XX"),
+        "coerce": _coerce_int,
+        "label": "Max step up",
+        "type": "number",
+    },
+    "max_step_down_xx": {
+        "legacy_names": ("GPU_WATCHDOG_MAX_STEP_DOWN_XX", "WATCHDOG_MAX_STEP_DOWN_XX"),
+        "env_names": ("GPU_WATCHDOG_MAX_STEP_DOWN_XX", "WATCHDOG_MAX_STEP_DOWN_XX"),
+        "coerce": _coerce_int,
+        "label": "Max step down",
+        "type": "number",
+    },
+    "emergency_temp_c": {
+        "legacy_names": ("GPU_WATCHDOG_EMERGENCY_TEMP_C", "WATCHDOG_EMERGENCY_TEMP_C"),
+        "env_names": ("GPU_WATCHDOG_EMERGENCY_TEMP_C", "WATCHDOG_EMERGENCY_TEMP_C"),
+        "coerce": _coerce_float,
+        "label": "Emergency temperature",
+        "type": "number",
+        "unit": "C",
+    },
+    "emergency_fan_xx": {
+        "legacy_names": ("GPU_WATCHDOG_EMERGENCY_FAN_XX", "WATCHDOG_EMERGENCY_FAN_XX"),
+        "env_names": ("GPU_WATCHDOG_EMERGENCY_FAN_XX", "WATCHDOG_EMERGENCY_FAN_XX"),
+        "coerce": _coerce_int,
+        "label": "Emergency fan",
+        "type": "number",
+    },
+    "failsafe_fan_xx": {
+        "legacy_names": ("GPU_WATCHDOG_FAILSAFE_FAN_MIN_XX", "WATCHDOG_FAILSAFE_FAN_MIN_XX"),
+        "env_names": ("GPU_WATCHDOG_FAILSAFE_FAN_MIN_XX", "WATCHDOG_FAILSAFE_FAN_MIN_XX"),
+        "coerce": _coerce_int,
+        "label": "Failsafe fan",
+        "type": "number",
+    },
+    "telemetry_stale_seconds": {
+        "legacy_names": ("GPU_WATCHDOG_TELEMETRY_STALE_SECONDS", "WATCHDOG_TELEMETRY_STALE_SECONDS"),
+        "env_names": ("GPU_WATCHDOG_TELEMETRY_STALE_SECONDS", "WATCHDOG_TELEMETRY_STALE_SECONDS"),
+        "coerce": _coerce_float,
+        "label": "Telemetry stale",
+        "type": "number",
+        "unit": "s",
+    },
+}
+
+
 def load_local_config(path: Path = LOCAL_CONFIG_PATH) -> LocalConfig:
     raw = _read_local_raw(path)
 
@@ -275,6 +426,35 @@ def update_gpu_fan_control_config(
     return fan_control
 
 
+def update_gpu_watchdog_curve_config(
+    updates: Mapping[str, Any],
+    path: Path = LOCAL_CONFIG_PATH,
+) -> GpuWatchdogCurveConfig:
+    allowed = set(GPU_WATCHDOG_CURVE_FIELDS)
+    unknown = sorted(set(updates) - allowed)
+    if unknown:
+        raise ConfigValidationError(
+            [{"loc": ("gpu", "watchdog_curve", key), "msg": "unknown setting", "type": "value_error.unknown"} for key in unknown]
+        )
+
+    raw = _read_local_raw(path)
+    current = LocalConfig.model_validate(raw)
+    merged = current.gpu.watchdog_curve.model_dump()
+    merged.update(dict(updates))
+
+    try:
+        watchdog_curve = GpuWatchdogCurveConfig.model_validate(merged)
+    except ValidationError as exc:
+        raise ConfigValidationError(exc.errors()) from exc
+
+    raw.setdefault("gpu", {})
+    if not isinstance(raw["gpu"], dict):
+        raw["gpu"] = {}
+    raw["gpu"]["watchdog_curve"] = watchdog_curve.model_dump(mode="json")
+    _dump_local_raw(raw, path)
+    return watchdog_curve
+
+
 def _resolve_gpu_telemetry_field(
     field_name: str,
     local: GpuTelemetryConfig,
@@ -333,6 +513,38 @@ def _resolve_gpu_fan_control_field(
     coerce = meta["coerce"]
 
     value = getattr(GpuFanControlConfig(), field_name)
+    source = "default"
+
+    if local_has_field:
+        value = getattr(local, field_name)
+        source = "config/local.json"
+
+    has_env, env_name, env_raw = _first_existing_env(environ, env_names)
+    if has_env:
+        value = coerce(env_raw)
+        source = "env"
+
+    has_legacy, legacy_name, legacy_raw = _first_existing_legacy(secrets_module, legacy_names)
+    if has_legacy:
+        value = coerce(legacy_raw)
+        source = "llm_secrets.py"
+
+    return SettingValue(key=legacy_name or env_name or legacy_names[0], value=value, source=source)
+
+
+def _resolve_gpu_watchdog_curve_field(
+    field_name: str,
+    local: GpuWatchdogCurveConfig,
+    local_has_field: bool,
+    secrets_module: Any,
+    environ: Mapping[str, str],
+) -> SettingValue:
+    meta = GPU_WATCHDOG_CURVE_FIELDS[field_name]
+    legacy_names = meta["legacy_names"]
+    env_names = meta["env_names"]
+    coerce = meta["coerce"]
+
+    value = getattr(GpuWatchdogCurveConfig(), field_name)
     source = "default"
 
     if local_has_field:
@@ -412,6 +624,36 @@ def effective_gpu_fan_control_values(
     }
 
 
+def effective_gpu_watchdog_curve_values(
+    secrets_module: Any = None,
+    environ: Optional[Mapping[str, str]] = None,
+    path: Path = LOCAL_CONFIG_PATH,
+    ignore_local_errors: bool = False,
+) -> dict[str, SettingValue]:
+    env = environ if environ is not None else os.environ
+    try:
+        raw = _read_local_raw(path)
+    except ConfigStoreError:
+        if not ignore_local_errors:
+            raise
+        raw = {}
+    local = LocalConfig.model_validate(raw).gpu.watchdog_curve
+    raw_gpu = raw.get("gpu", {})
+    raw_watchdog_curve = raw_gpu.get("watchdog_curve", {}) if isinstance(raw_gpu, dict) else {}
+    if not isinstance(raw_watchdog_curve, dict):
+        raw_watchdog_curve = {}
+    return {
+        field_name: _resolve_gpu_watchdog_curve_field(
+            field_name,
+            local,
+            field_name in raw_watchdog_curve,
+            secrets_module,
+            env,
+        )
+        for field_name in GPU_WATCHDOG_CURVE_FIELDS
+    }
+
+
 def gpu_telemetry_fields_for_api(
     secrets_module: Any = None,
     environ: Optional[Mapping[str, str]] = None,
@@ -420,6 +662,30 @@ def gpu_telemetry_fields_for_api(
     values = effective_gpu_telemetry_values(secrets_module=secrets_module, environ=environ, path=path)
     fields: list[dict[str, Any]] = []
     for field_name, meta in GPU_TELEMETRY_FIELDS.items():
+        resolved = values[field_name]
+        field = {
+            "key": resolved.key,
+            "config_key": field_name,
+            "label": meta["label"],
+            "value": resolved.value,
+            "type": meta["type"],
+            "source": resolved.source,
+            "editable": resolved.source in ("default", "config/local.json"),
+        }
+        if "unit" in meta:
+            field["unit"] = meta["unit"]
+        fields.append(field)
+    return fields
+
+
+def gpu_watchdog_curve_fields_for_api(
+    secrets_module: Any = None,
+    environ: Optional[Mapping[str, str]] = None,
+    path: Path = LOCAL_CONFIG_PATH,
+) -> list[dict[str, Any]]:
+    values = effective_gpu_watchdog_curve_values(secrets_module=secrets_module, environ=environ, path=path)
+    fields: list[dict[str, Any]] = []
+    for field_name, meta in GPU_WATCHDOG_CURVE_FIELDS.items():
         resolved = values[field_name]
         field = {
             "key": resolved.key,

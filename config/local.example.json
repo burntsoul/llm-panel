@@ -14,6 +14,24 @@
       "glances_timeout_seconds": 2.5,
       "log_throttle_seconds": 60.0,
       "skip_when_vm_off": true
+    },
+    "watchdog_curve": {
+      "command_min_delta_xx": 5,
+      "command_min_interval_seconds": 20.0,
+      "emergency_fan_xx": 230,
+      "emergency_temp_c": 84.0,
+      "failsafe_fan_xx": 190,
+      "integral_clamp": 800.0,
+      "ki": 0.08,
+      "kp": 14.0,
+      "max_fan_xx": 230,
+      "max_step_down_xx": 10,
+      "max_step_up_xx": 20,
+      "min_fan_xx": 40,
+      "poll_seconds": 5.0,
+      "smoothing_alpha": 0.25,
+      "target_temp_c": 72.0,
+      "telemetry_stale_seconds": 15.0
     }
   }
 }

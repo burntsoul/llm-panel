@@ -563,11 +563,13 @@ function updateWatchdogPanelFromData(wd, gpuFallback) {
   setText("wd-last-error", wd && wd.last_error ? String(wd.last_error) : gpuFallback && gpuFallback.error ? String(gpuFallback.error) : "--");
 
   const poll = wd && wd.poll_seconds !== undefined ? `${wd.poll_seconds}s` : "--";
-  const hysteresis = wd && wd.hysteresis_c !== undefined ? `${wd.hysteresis_c}\u00b0C` : "--";
-  const failsafe = wd && wd.failsafe_fan_min_xx !== undefined ? String(wd.failsafe_fan_min_xx) : "--";
+  const targetTemp = wd && wd.target_temp_c !== undefined ? `${wd.target_temp_c}\u00b0C` : "--";
+  const smoothTemp = wd && typeof wd.smoothed_temp_c === "number" ? `${wd.smoothed_temp_c.toFixed(1)}\u00b0C` : "--";
+  const desiredFan = wd && wd.desired_fan_xx !== null && wd.desired_fan_xx !== undefined ? String(wd.desired_fan_xx) : "--";
+  const limitedFan = wd && wd.rate_limited_target_xx !== null && wd.rate_limited_target_xx !== undefined ? String(wd.rate_limited_target_xx) : "--";
   const minChange = wd && wd.min_change_interval_seconds !== undefined ? `${wd.min_change_interval_seconds}s` : "--";
-  const thresholds = wd && wd.thresholds ? wd.thresholds : "--";
-  setText("wd-settings-summary", `Poll/hysteresis/failsafe/min-change: ${poll} / ${hysteresis} / ${failsafe} / ${minChange} | thresholds: ${thresholds}`);
+  const minDelta = wd && wd.command_min_delta_xx !== undefined ? String(wd.command_min_delta_xx) : "--";
+  setText("wd-settings-summary", `PI: poll ${poll}, target ${targetTemp}, smooth ${smoothTemp}, desired/limited ${desiredFan}/${limitedFan}, command ${minChange}/delta ${minDelta}`);
 }
 
 async function refreshWatchdogPanel() {

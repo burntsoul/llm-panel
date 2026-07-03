@@ -5,7 +5,11 @@ import json
 import os
 from pathlib import Path
 
-from config_store import effective_gpu_fan_control_values, effective_gpu_telemetry_values
+from config_store import (
+    effective_gpu_fan_control_values,
+    effective_gpu_telemetry_values,
+    effective_gpu_watchdog_curve_values,
+)
 
 try:
     import llm_secrets as secrets  # type: ignore
@@ -177,30 +181,30 @@ class Settings:
         self.GLANCES_TIMEOUT_SECONDS = float(gpu_telemetry["glances_timeout_seconds"].value)
         self.GPU_TELEMETRY_SKIP_WHEN_VM_OFF = bool(gpu_telemetry["skip_when_vm_off"].value)
         self.GPU_TELEMETRY_LOG_THROTTLE_SECONDS = float(gpu_telemetry["log_throttle_seconds"].value)
+        gpu_watchdog_curve = effective_gpu_watchdog_curve_values(
+            secrets_module=secrets,
+            ignore_local_errors=True,
+        )
         self.GPU_WATCHDOG_ENABLED = _env_bool(
             "GPU_WATCHDOG_ENABLED",
             _env_bool("WATCHDOG_ENABLED", False),
         )
-        self.GPU_WATCHDOG_POLL_SECONDS = _env_float(
-            "GPU_WATCHDOG_POLL_SECONDS",
-            _env_float("WATCHDOG_POLL_SECONDS", 5.0),
-        )
-        self.GPU_WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS = _env_float(
-            "GPU_WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS",
-            _env_float("WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS", 20.0),
-        )
-        self.GPU_WATCHDOG_FAILSAFE_FAN_MIN_XX = _env_int(
-            "GPU_WATCHDOG_FAILSAFE_FAN_MIN_XX",
-            _env_int("WATCHDOG_FAILSAFE_FAN_MIN_XX", 190),
-        )
-        self.GPU_WATCHDOG_HYSTERESIS_C = _env_float(
-            "GPU_WATCHDOG_HYSTERESIS_C",
-            _env_float("WATCHDOG_HYSTERESIS_C", 4.0),
-        )
-        self.GPU_WATCHDOG_TELEMETRY_STALE_SECONDS = _env_float(
-            "GPU_WATCHDOG_TELEMETRY_STALE_SECONDS",
-            _env_float("WATCHDOG_TELEMETRY_STALE_SECONDS", 15.0),
-        )
+        self.GPU_WATCHDOG_POLL_SECONDS = float(gpu_watchdog_curve["poll_seconds"].value)
+        self.GPU_WATCHDOG_TARGET_TEMP_C = float(gpu_watchdog_curve["target_temp_c"].value)
+        self.GPU_WATCHDOG_MIN_FAN_XX = int(gpu_watchdog_curve["min_fan_xx"].value)
+        self.GPU_WATCHDOG_MAX_FAN_XX = int(gpu_watchdog_curve["max_fan_xx"].value)
+        self.GPU_WATCHDOG_PI_KP = float(gpu_watchdog_curve["kp"].value)
+        self.GPU_WATCHDOG_PI_KI = float(gpu_watchdog_curve["ki"].value)
+        self.GPU_WATCHDOG_PI_INTEGRAL_CLAMP = float(gpu_watchdog_curve["integral_clamp"].value)
+        self.GPU_WATCHDOG_SMOOTHING_ALPHA = float(gpu_watchdog_curve["smoothing_alpha"].value)
+        self.GPU_WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS = float(gpu_watchdog_curve["command_min_interval_seconds"].value)
+        self.GPU_WATCHDOG_COMMAND_MIN_DELTA_XX = int(gpu_watchdog_curve["command_min_delta_xx"].value)
+        self.GPU_WATCHDOG_MAX_STEP_UP_XX = int(gpu_watchdog_curve["max_step_up_xx"].value)
+        self.GPU_WATCHDOG_MAX_STEP_DOWN_XX = int(gpu_watchdog_curve["max_step_down_xx"].value)
+        self.GPU_WATCHDOG_EMERGENCY_TEMP_C = float(gpu_watchdog_curve["emergency_temp_c"].value)
+        self.GPU_WATCHDOG_EMERGENCY_FAN_XX = int(gpu_watchdog_curve["emergency_fan_xx"].value)
+        self.GPU_WATCHDOG_FAILSAFE_FAN_MIN_XX = int(gpu_watchdog_curve["failsafe_fan_xx"].value)
+        self.GPU_WATCHDOG_TELEMETRY_STALE_SECONDS = float(gpu_watchdog_curve["telemetry_stale_seconds"].value)
         self.GPU_WATCHDOG_LOG_TRANSITIONS_ONLY = _env_bool(
             "GPU_WATCHDOG_LOG_TRANSITIONS_ONLY",
             _env_bool("WATCHDOG_LOG_TRANSITIONS_ONLY", True),
@@ -214,7 +218,7 @@ class Settings:
         self.WATCHDOG_POLL_SECONDS = self.GPU_WATCHDOG_POLL_SECONDS
         self.WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS = self.GPU_WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS
         self.WATCHDOG_FAILSAFE_FAN_MIN_XX = self.GPU_WATCHDOG_FAILSAFE_FAN_MIN_XX
-        self.WATCHDOG_HYSTERESIS_C = self.GPU_WATCHDOG_HYSTERESIS_C
+        self.WATCHDOG_HYSTERESIS_C = _env_float("GPU_WATCHDOG_HYSTERESIS_C", _env_float("WATCHDOG_HYSTERESIS_C", 4.0))
         self.WATCHDOG_TELEMETRY_STALE_SECONDS = self.GPU_WATCHDOG_TELEMETRY_STALE_SECONDS
         self.WATCHDOG_LOG_TRANSITIONS_ONLY = self.GPU_WATCHDOG_LOG_TRANSITIONS_ONLY
 

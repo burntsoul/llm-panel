@@ -11,10 +11,13 @@ from config_store import (
     ConfigValidationError,
     effective_gpu_fan_control_values,
     effective_gpu_telemetry_values,
+    effective_gpu_watchdog_curve_values,
     gpu_fan_control_fields_for_api,
+    gpu_watchdog_curve_fields_for_api,
     load_local_config,
     update_gpu_fan_control_config,
     update_gpu_telemetry_config,
+    update_gpu_watchdog_curve_config,
 )
 
 
@@ -36,6 +39,9 @@ class TestConfigStore(unittest.TestCase):
         self.assertEqual(config.gpu.fan_control.ilo_ssh_port, 22)
         self.assertEqual(config.gpu.fan_control.ilo_fan_patch_index, 3)
         self.assertEqual(config.gpu.fan_control.ilo_sshpass_path, "sshpass")
+        self.assertEqual(config.gpu.watchdog_curve.target_temp_c, 72.0)
+        self.assertEqual(config.gpu.watchdog_curve.command_min_delta_xx, 5)
+        self.assertEqual(config.gpu.watchdog_curve.emergency_temp_c, 84.0)
 
     def test_json_overrides_defaults(self):
         path = self.temp_path()
@@ -221,6 +227,78 @@ class TestConfigStore(unittest.TestCase):
 
         self.assertIn("configured", encoded)
         self.assertNotIn("super-secret-password", encoded)
+
+    def test_gpu_watchdog_curve_json_overrides_defaults(self):
+        path = self.temp_path()
+        path.write_text(
+            json.dumps(
+                {
+                    "gpu": {
+                        "watchdog_curve": {
+                            "poll_seconds": 3.0,
+                            "target_temp_c": 70.0,
+                            "command_min_delta_xx": 8,
+                            "max_step_up_xx": 15,
+                            "failsafe_fan_xx": 200,
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        values = effective_gpu_watchdog_curve_values(path=path, environ={})
+
+        self.assertEqual(values["poll_seconds"].value, 3.0)
+        self.assertEqual(values["poll_seconds"].source, "config/local.json")
+        self.assertEqual(values["target_temp_c"].value, 70.0)
+        self.assertEqual(values["command_min_delta_xx"].value, 8)
+        self.assertEqual(values["max_step_up_xx"].value, 15)
+        self.assertEqual(values["failsafe_fan_xx"].value, 200)
+
+    def test_gpu_watchdog_curve_env_overrides_json_with_legacy_name(self):
+        path = self.temp_path()
+        path.write_text(
+            json.dumps({"gpu": {"watchdog_curve": {"poll_seconds": 3.0}}}),
+            encoding="utf-8",
+        )
+
+        values = effective_gpu_watchdog_curve_values(path=path, environ={"WATCHDOG_POLL_SECONDS": "7"})
+
+        self.assertEqual(values["poll_seconds"].value, 7.0)
+        self.assertEqual(values["poll_seconds"].source, "env")
+
+    def test_update_gpu_watchdog_curve_preserves_unrelated_config(self):
+        path = self.temp_path()
+        path.write_text(
+            json.dumps(
+                {
+                    "gpu": {"telemetry": {"log_throttle_seconds": 30}},
+                    "future": {"kept": True},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        update_gpu_watchdog_curve_config({"target_temp_c": 70.0}, path=path)
+        raw = json.loads(path.read_text(encoding="utf-8"))
+
+        self.assertEqual(raw["future"], {"kept": True})
+        self.assertEqual(raw["gpu"]["telemetry"], {"log_throttle_seconds": 30})
+        self.assertEqual(raw["gpu"]["watchdog_curve"]["target_temp_c"], 70.0)
+
+    def test_invalid_gpu_watchdog_curve_range_rejected(self):
+        path = self.temp_path()
+
+        with self.assertRaises(ConfigValidationError):
+            update_gpu_watchdog_curve_config({"min_fan_xx": 200, "max_fan_xx": 100}, path=path)
+
+    def test_gpu_watchdog_curve_fields_for_api(self):
+        fields = gpu_watchdog_curve_fields_for_api(environ={}, path=self.temp_path())
+
+        encoded = json.dumps(fields)
+        self.assertIn("target_temp_c", encoded)
+        self.assertIn("command_min_delta_xx", encoded)
 
 
 if __name__ == "__main__":
