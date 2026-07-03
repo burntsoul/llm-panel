@@ -48,6 +48,13 @@ from models import (
     cache_embeddings,
     invalidate_model_cache,
     sync_model_meta_with_ollama,
+    delete_model_profile,
+    get_model_profiles,
+    is_profile_backing_model,
+    resolve_model_for_upstream,
+    rewrite_model_ids,
+    upsert_model_profile,
+    profile_backing_model_name,
 )
 from lease_api import router as lease_api_router
 from comfyui_service import (
@@ -1547,6 +1554,65 @@ def _ollama_delete_request(model: str) -> requests.Response:
     )
 
 
+def _ollama_model_names() -> set[str]:
+    resp = requests.get(_ollama_api_url("tags"), timeout=5)
+    resp.raise_for_status()
+    data = resp.json()
+    return {m.get("name") for m in data.get("models", []) if m.get("name")}
+
+
+def _sse_event(event: str, payload: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
+
+
+def _parse_profile_payload(body: dict, existing_model: str | None = None) -> tuple[str, dict, str | None]:
+    public_model = str(body.get("public_model") or existing_model or "").strip()
+    if not public_model:
+        raise HTTPException(status_code=400, detail={"error": "public_model is required"})
+    if is_profile_backing_model(public_model):
+        raise HTTPException(status_code=400, detail={"error": "cannot profile a private backing model"})
+
+    raw_parameters = body.get("parameters") or {}
+    if not isinstance(raw_parameters, dict):
+        raise HTTPException(status_code=400, detail={"error": "parameters must be an object"})
+
+    allowed = {
+        "num_ctx": int,
+        "num_gpu": int,
+        "main_gpu": int,
+        "temperature": float,
+        "top_p": float,
+        "repeat_penalty": float,
+        "num_predict": int,
+        "keep_alive": str,
+    }
+    parameters = {}
+    for key, caster in allowed.items():
+        value = raw_parameters.get(key)
+        if value in (None, ""):
+            continue
+        try:
+            parameters[key] = caster(value)
+        except Exception:
+            raise HTTPException(status_code=400, detail={"error": f"{key} has invalid value"})
+
+    system = body.get("system")
+    if system is not None:
+        system = str(system)
+        if not system.strip():
+            system = None
+
+    return public_model, parameters, system
+
+
+def _profile_response() -> dict:
+    return {
+        "ok": True,
+        "profiles": get_model_profiles(),
+        "models": get_model_table_status(),
+    }
+
+
 @app.get("/api/providers/ollama/models")
 async def api_ollama_provider_models():
     await _ensure_ollama_for_management()
@@ -1556,6 +1622,7 @@ async def api_ollama_provider_models():
         "provider": "ollama",
         "base_url": settings.LLM_SERVER_BASE,
         "models": rows,
+        "profiles": get_model_profiles(),
     }
 
 
@@ -1639,6 +1706,116 @@ async def api_ollama_delete_model(model: str):
         "message": f"Model '{model}' removed.",
         "models": rows,
     }
+
+
+@app.get("/api/providers/ollama/profiles")
+async def api_ollama_profiles():
+    return _profile_response()
+
+
+async def _stream_profile_create(public_model: str, parameters: dict, system: str | None):
+    await _ensure_ollama_for_management()
+
+    live_names = await asyncio.get_running_loop().run_in_executor(None, _ollama_model_names)
+    if public_model not in live_names:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "base model must be re-pulled before editing this profile"},
+        )
+
+    backing_model = profile_backing_model_name(public_model)
+    create_payload = {
+        "from": public_model,
+        "model": backing_model,
+        "parameters": parameters,
+        "stream": True,
+    }
+    if system:
+        create_payload["system"] = system
+
+    async def events():
+        try:
+            async with httpx.AsyncClient(timeout=None) as client:
+                async with client.stream("POST", _ollama_api_url("create"), json=create_payload) as resp:
+                    if resp.status_code >= 400:
+                        body = await resp.aread()
+                        message = body.decode("utf-8", errors="replace").strip() or f"HTTP {resp.status_code}"
+                        yield _sse_event("error", {"error": message})
+                        return
+
+                    async for line in resp.aiter_lines():
+                        if line:
+                            yield f"event: progress\ndata: {line}\n\n"
+
+            upsert_model_profile(public_model, parameters, system)
+            rows = _refresh_ollama_model_state()
+            yield _sse_event(
+                "models",
+                {"models": rows, "profiles": get_model_profiles()},
+            )
+            yield _sse_event("done", {"message": f"Profile for '{public_model}' saved."})
+        except Exception as exc:
+            yield _sse_event("error", {"error": f"Ollama profile create failed: {exc}"})
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@app.post("/api/providers/ollama/profiles")
+async def api_ollama_create_profile(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail={"error": "invalid JSON body"})
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail={"error": "body must be a JSON object"})
+    public_model, parameters, system = _parse_profile_payload(body)
+    return await _stream_profile_create(public_model, parameters, system)
+
+
+@app.put("/api/providers/ollama/profiles/{public_model:path}")
+async def api_ollama_update_profile(public_model: str, request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail={"error": "invalid JSON body"})
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail={"error": "body must be a JSON object"})
+    public_model, parameters, system = _parse_profile_payload(body, existing_model=public_model)
+    return await _stream_profile_create(public_model, parameters, system)
+
+
+@app.delete("/api/providers/ollama/profiles/{public_model:path}/backing")
+async def api_ollama_delete_profile_backing(public_model: str):
+    profile_backing = profile_backing_model_name(public_model)
+    await _ensure_ollama_for_management()
+    try:
+        loop = asyncio.get_running_loop()
+        resp = await loop.run_in_executor(
+            None,
+            lambda: _ollama_delete_request(profile_backing),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail={"error": f"Ollama delete failed: {exc}"})
+    if not resp.ok:
+        raise HTTPException(status_code=resp.status_code, detail={"error": _ollama_error_message(resp)})
+    rows = _refresh_ollama_model_state()
+    return {
+        "ok": True,
+        "message": f"Backing model '{profile_backing}' removed.",
+        "models": rows,
+        "profiles": get_model_profiles(),
+    }
+
+
+@app.delete("/api/providers/ollama/profiles/{public_model:path}")
+async def api_ollama_delete_profile(public_model: str):
+    delete_model_profile(public_model)
+    invalidate_model_cache()
+    return _profile_response()
 
 @app.get("/models", response_class=HTMLResponse)
 def models_page():
@@ -1761,6 +1938,31 @@ async def ensure_llm_running_and_ready(timeout: int = 180) -> bool:
 
 # --- OpenAI-yhteensopivat endpointit ---
 
+def _resolve_request_model(payload: dict) -> tuple[str | None, str | None]:
+    public_model = payload.get("model")
+    if not isinstance(public_model, str) or not public_model.strip():
+        return None, None
+    public_model = public_model.strip()
+    upstream_model = resolve_model_for_upstream(public_model)
+    payload["model"] = upstream_model
+    return public_model, upstream_model
+
+
+def _rewrite_upstream_json(payload: dict, public_model: str | None, upstream_model: str | None) -> dict:
+    if not public_model or not upstream_model:
+        return payload
+    return rewrite_model_ids(payload, public_model, upstream_model)
+
+
+async def _rewrite_upstream_sse_chunks(byte_iter, public_model: str | None, upstream_model: str | None):
+    backing = (upstream_model or "").encode("utf-8")
+    public = (public_model or "").encode("utf-8")
+    async for chunk in byte_iter:
+        if backing and public and backing != public:
+            chunk = chunk.replace(backing, public)
+        yield chunk
+
+
 @app.get("/v1/models")
 async def list_models():
     """
@@ -1872,6 +2074,8 @@ async def chat_completions(request: Request):
     if stream:
         upstream_payload["stream"] = True
 
+    public_model, upstream_model = _resolve_request_model(upstream_payload)
+
     # 1) Varmistetaan, että llm-server on hereillä
     ready = await ensure_llm_running_and_ready()
     if not ready:
@@ -1901,8 +2105,11 @@ async def chat_completions(request: Request):
                     content=upstream_body,
                     headers=headers,
                 ) as upstream_resp:
-                    async for chunk in upstream_resp.aiter_bytes():
-                        # chunk sisältää valmiiksi "data: ...\n\n" -tyyppisiä rivejä
+                    async for chunk in _rewrite_upstream_sse_chunks(
+                        upstream_resp.aiter_bytes(),
+                        public_model,
+                        upstream_model,
+                    ):
                         yield chunk
 
         return StreamingResponse(
@@ -1946,6 +2153,8 @@ async def chat_completions(request: Request):
                         }
         except Exception:
             pass
+
+    data = _rewrite_upstream_json(data, public_model, upstream_model)
 
     return JSONResponse(status_code=upstream_resp.status_code, content=data)
 
@@ -2109,6 +2318,7 @@ async def completions(request: Request):
         upstream_payload["max_tokens"] = max(1, int(max_tokens))
     if stream:
         upstream_payload["stream"] = True
+    public_model, upstream_model = _resolve_request_model(upstream_payload)
 
     upstream_url = f"{settings.LLM_SERVER_BASE}/v1/completions"
     headers = {"Content-Type": "application/json"}
@@ -2128,6 +2338,8 @@ async def completions(request: Request):
             chat_payload.pop("prompt", None)
             chat_payload.pop("system_prompt", None)
             chat_payload["stream"] = True
+            if upstream_model:
+                chat_payload["model"] = upstream_model
 
             chat_url = f"{settings.LLM_SERVER_BASE}/v1/chat/completions"
             chat_body = json.dumps(chat_payload).encode("utf-8")
@@ -2158,6 +2370,7 @@ async def completions(request: Request):
                             except Exception:
                                 continue
                             mapped = _chat_chunk_to_completion_chunk(payload)
+                            mapped = _rewrite_upstream_json(mapped, public_model, upstream_model)
                             out = json.dumps(mapped).encode("utf-8")
                             yield b"data: " + out + b"\n\n"
 
@@ -2176,7 +2389,11 @@ async def completions(request: Request):
                             yield item
                         return
 
-                    async for chunk in upstream_resp.aiter_bytes():
+                    async for chunk in _rewrite_upstream_sse_chunks(
+                        upstream_resp.aiter_bytes(),
+                        public_model,
+                        upstream_model,
+                    ):
                         yield chunk
 
         return StreamingResponse(stream_from_upstream(), media_type="text/event-stream")
@@ -2201,6 +2418,8 @@ async def completions(request: Request):
         chat_payload["messages"] = messages
         chat_payload.pop("prompt", None)
         chat_payload.pop("system_prompt", None)
+        if upstream_model:
+            chat_payload["model"] = upstream_model
 
         chat_url = f"{settings.LLM_SERVER_BASE}/v1/chat/completions"
         chat_body = json.dumps(chat_payload).encode("utf-8")
@@ -2226,6 +2445,7 @@ async def completions(request: Request):
             )
 
         mapped = _chat_to_completion_response(data)
+        mapped = _rewrite_upstream_json(mapped, public_model, upstream_model)
         return JSONResponse(status_code=upstream_resp.status_code, content=mapped)
 
     try:
@@ -2242,6 +2462,7 @@ async def completions(request: Request):
         )
 
     # Upstream already returned a completion-shaped response; return as-is.
+    data = _rewrite_upstream_json(data, public_model, upstream_model)
     return JSONResponse(status_code=upstream_resp.status_code, content=data)
 
 
@@ -2299,6 +2520,7 @@ async def create_embeddings(request: Request):
                 }
             },
         )
+    upstream_model = resolve_model_for_upstream(model)
     
     if input_data is None:
         return JSONResponse(
@@ -2340,7 +2562,7 @@ async def create_embeddings(request: Request):
         )
     
     # 1) Tarkista cache
-    cached = get_cached_embeddings(model, texts)
+    cached = get_cached_embeddings(upstream_model, texts)
     if cached is not None:
         # Cached contains the "data" array from Ollama response
         embeddings_data_array = cached
@@ -2365,7 +2587,7 @@ async def create_embeddings(request: Request):
         # Rakenna payload Ollaman odottamassa muodossa
         # Ollama expects "input" field (array of strings)
         upstream_payload = {
-            "model": model,
+            "model": upstream_model,
             "input": texts,
         }
         
@@ -2401,7 +2623,7 @@ async def create_embeddings(request: Request):
             embeddings_data_array = data.get("data", [])
             
             # Cache the result
-            cache_embeddings(model, texts, embeddings_data_array)
+            cache_embeddings(upstream_model, texts, embeddings_data_array)
         
         except Exception as e:
             return JSONResponse(

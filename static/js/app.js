@@ -39,6 +39,7 @@ let settingsData = null;
 let activeSettingsSection = "runtime";
 let settingsDirty = false;
 let settingsAdvanced = false;
+let ollamaProfiles = [];
 let gpuStatusChart = null;
 let gpuStatusWindow = "15m";
 let gpuStatusTimer = null;
@@ -1331,6 +1332,12 @@ function setOllamaButtonsDisabled(disabled) {
   qsa("[data-ollama-action]").forEach((btn) => {
     btn.disabled = disabled;
   });
+  qsa("[data-ollama-profile-required]").forEach((btn) => {
+    btn.disabled = disabled || btn.dataset.profileEnabled !== "true";
+  });
+  qsa("[data-ollama-backing-required]").forEach((btn) => {
+    btn.disabled = disabled || btn.dataset.backingPresent !== "true";
+  });
   qsa("[data-ollama-remove]").forEach((btn) => {
     btn.disabled = disabled || btn.dataset.presentNow !== "true";
   });
@@ -1370,6 +1377,130 @@ function hideOllamaPullProgress() {
   if (text) text.textContent = "";
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function profileForModel(modelId) {
+  return (ollamaProfiles || []).find((profile) => profile.public_model === modelId) || null;
+}
+
+function collectProfileFormValues() {
+  const parameters = {};
+  qsa("#ollama-profile-form [data-profile-param]").forEach((input) => {
+    const key = input.dataset.profileParam;
+    const value = input.value.trim();
+    if (value === "") return;
+    if (input.dataset.profileType === "int") parameters[key] = Number.parseInt(value, 10);
+    else if (input.dataset.profileType === "float") parameters[key] = Number.parseFloat(value);
+    else parameters[key] = value;
+  });
+  const system = qs("#profile-system")?.value || "";
+  return { parameters, system };
+}
+
+async function streamOllamaProfileSave(modelId, isEdit) {
+  const status = qs("#profile-save-status");
+  const saveBtn = qs("#profile-save-btn");
+  if (saveBtn) saveBtn.disabled = true;
+  if (status) status.textContent = "Saving profile...";
+
+  const values = collectProfileFormValues();
+  const url = isEdit
+    ? `/api/providers/ollama/profiles/${encodeURIComponent(modelId)}`
+    : "/api/providers/ollama/profiles";
+  const method = isEdit ? "PUT" : "POST";
+
+  try {
+    const resp = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        public_model: modelId,
+        parameters: values.parameters,
+        system: values.system,
+      }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    if (!resp.body) throw new Error("Streaming response is not available in this browser");
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let doneMessage = "Profile saved.";
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      buffer = parseSseChunk(buffer, (eventName, data) => {
+        if (eventName === "progress" && status) {
+          status.textContent = data && data.status ? data.status : "Creating profile...";
+        } else if (eventName === "models") {
+          ollamaProfiles = data.profiles || [];
+          renderOllamaProviderRows(data.models || []);
+        } else if (eventName === "done") {
+          doneMessage = data && data.message ? data.message : doneMessage;
+        } else if (eventName === "error") {
+          throw new Error(data && data.error ? data.error : "profile stream failed");
+        }
+      });
+    }
+
+    if (status) status.textContent = doneMessage;
+    setOllamaProviderStatus(doneMessage, false);
+    window.setTimeout(closeModal, 700);
+  } catch (err) {
+    if (status) status.textContent = `Save failed: ${err}`;
+    setOllamaProviderStatus(`Profile save failed: ${err}`, true);
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+  }
+}
+
+function openOllamaProfileEditor(modelId) {
+  const profile = profileForModel(modelId);
+  const params = profile && profile.parameters ? profile.parameters : {};
+  const field = (key, label, type = "int") => `
+    <label class="profile-field">
+      <span>${label}</span>
+      <input type="number" step="${type === "float" ? "0.01" : "1"}" data-profile-param="${key}" data-profile-type="${type}" value="${escapeHtml(params[key] ?? "")}" />
+    </label>`;
+  const body = `
+    <div id="ollama-profile-form" class="profile-form">
+      <div class="settings-section-title">${escapeHtml(modelId)}</div>
+      <div class="profile-grid">
+        ${field("num_ctx", "Context tokens")}
+        ${field("num_gpu", "GPU layers")}
+        ${field("main_gpu", "Main GPU")}
+        ${field("temperature", "Temperature", "float")}
+        ${field("top_p", "Top P", "float")}
+        ${field("repeat_penalty", "Repeat penalty", "float")}
+        ${field("num_predict", "Max tokens")}
+        <label class="profile-field">
+          <span>Keep alive</span>
+          <input type="text" data-profile-param="keep_alive" data-profile-type="text" value="${escapeHtml(params.keep_alive ?? "")}" placeholder="5m" />
+        </label>
+      </div>
+      <label class="profile-system">
+        <span>System prompt</span>
+        <textarea id="profile-system" rows="5">${escapeHtml(profile && profile.system ? profile.system : "")}</textarea>
+      </label>
+      <div class="button-row top-gap">
+        <button type="button" class="primary" id="profile-save-btn">${profile ? "Update profile" : "Create profile"}</button>
+      </div>
+      <p class="settings-save-status muted" id="profile-save-status">Profile edits rebuild from the original base model.</p>
+    </div>`;
+  openModal(profile ? "Edit Ollama profile" : "Create Ollama profile", body);
+  const saveBtn = qs("#profile-save-btn");
+  if (saveBtn) saveBtn.addEventListener("click", () => streamOllamaProfileSave(modelId, !!profile));
+}
+
 function renderOllamaProviderRows(rows) {
   const body = qs("#ollama-model-table-body");
   if (!body) return;
@@ -1396,16 +1527,49 @@ function renderOllamaProviderRows(rows) {
     else if (row.present_now === false) status = "missing";
     meta.textContent = `${status} / ${row.source || "local"} / ${row.device || "unknown"}`;
 
+    const profile = profileForModel(row.id || "");
+    const profileMeta = document.createElement("span");
+    profileMeta.textContent = profile ? `profile ${profile.status || "active"}` : "base";
+
+    const actions = document.createElement("div");
+    actions.className = "provider-action-row";
+
+    const profileBtn = document.createElement("button");
+    profileBtn.type = "button";
+    profileBtn.className = "secondary";
+    profileBtn.dataset.ollamaAction = "profile";
+    profileBtn.textContent = profile ? "Edit profile" : "Create profile";
+    profileBtn.addEventListener("click", () => openOllamaProfileEditor(row.id || ""));
+
+    const removeProfileBtn = document.createElement("button");
+    removeProfileBtn.type = "button";
+    removeProfileBtn.dataset.ollamaAction = "remove-profile";
+    removeProfileBtn.dataset.ollamaProfileRequired = "true";
+    removeProfileBtn.dataset.profileEnabled = profile ? "true" : "false";
+    removeProfileBtn.textContent = "Remove profile";
+    removeProfileBtn.disabled = !profile;
+    removeProfileBtn.addEventListener("click", () => removeOllamaProfile(row.id || ""));
+
+    const removeBackingBtn = document.createElement("button");
+    removeBackingBtn.type = "button";
+    removeBackingBtn.dataset.ollamaAction = "remove-backing";
+    removeBackingBtn.dataset.ollamaBackingRequired = "true";
+    removeBackingBtn.dataset.backingPresent = profile && profile.backing_present === true ? "true" : "false";
+    removeBackingBtn.textContent = "Remove backing";
+    removeBackingBtn.disabled = !profile || profile.backing_present !== true;
+    removeBackingBtn.addEventListener("click", () => removeOllamaProfileBacking(row.id || ""));
+
     const removeBtn = document.createElement("button");
     removeBtn.type = "button";
     removeBtn.className = "danger";
     removeBtn.textContent = "Remove";
     removeBtn.dataset.ollamaRemove = "true";
-    removeBtn.dataset.presentNow = row.present_now === true ? "true" : "false";
-    removeBtn.disabled = row.present_now !== true;
+    removeBtn.dataset.presentNow = row.base_present_now === true ? "true" : "false";
+    removeBtn.disabled = row.base_present_now !== true;
     removeBtn.addEventListener("click", () => removeOllamaModel(row.id || ""));
 
-    item.append(name, meta, removeBtn);
+    actions.append(profileBtn, removeProfileBtn, removeBackingBtn, removeBtn);
+    item.append(name, meta, profileMeta, actions);
     body.appendChild(item);
   });
 }
@@ -1415,10 +1579,50 @@ async function refreshOllamaProviderModels(showLoading = true) {
 
   try {
     const data = await getJson("/api/models");
+    try {
+      const profilesData = await getJson("/api/providers/ollama/profiles");
+      ollamaProfiles = profilesData.profiles || [];
+    } catch (_) {
+      ollamaProfiles = [];
+    }
     renderOllamaProviderRows(data.models || []);
     setOllamaProviderStatus(`Loaded ${(data.models || []).length} models.`, false);
   } catch (err) {
     setOllamaProviderStatus(`Model refresh failed: ${err}`, true);
+  }
+}
+
+async function removeOllamaProfile(modelId) {
+  const name = String(modelId || "").trim();
+  if (!name) return;
+  if (!window.confirm(`Remove llm-agent profile mapping for "${name}"?`)) return;
+  setOllamaButtonsDisabled(true);
+  try {
+    const data = await getJson(`/api/providers/ollama/profiles/${encodeURIComponent(name)}`, { method: "DELETE" });
+    ollamaProfiles = data.profiles || [];
+    renderOllamaProviderRows(data.models || []);
+    setOllamaProviderStatus(`Profile mapping removed for ${name}.`, false);
+  } catch (err) {
+    setOllamaProviderStatus(`Remove profile failed: ${err}`, true);
+  } finally {
+    setOllamaButtonsDisabled(false);
+  }
+}
+
+async function removeOllamaProfileBacking(modelId) {
+  const name = String(modelId || "").trim();
+  if (!name) return;
+  if (!window.confirm(`Remove private Ollama backing model for "${name}"?`)) return;
+  setOllamaButtonsDisabled(true);
+  try {
+    const data = await getJson(`/api/providers/ollama/profiles/${encodeURIComponent(name)}/backing`, { method: "DELETE" });
+    ollamaProfiles = data.profiles || [];
+    renderOllamaProviderRows(data.models || []);
+    setOllamaProviderStatus(data.message || `Backing model removed for ${name}.`, false);
+  } catch (err) {
+    setOllamaProviderStatus(`Remove backing failed: ${err}`, true);
+  } finally {
+    setOllamaButtonsDisabled(false);
   }
 }
 
@@ -1594,7 +1798,7 @@ function buildOllamaProviderSection() {
   table.className = "provider-model-table";
   const head = document.createElement("div");
   head.className = "provider-model-row provider-model-head";
-  ["Model", "State", "Action"].forEach((text) => {
+  ["Model", "State", "Profile", "Actions"].forEach((text) => {
     const node = document.createElement("span");
     node.textContent = text;
     head.appendChild(node);

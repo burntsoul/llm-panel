@@ -868,7 +868,7 @@ button:disabled {
 
 .provider-model-row {
   display: grid;
-  grid-template-columns: minmax(12rem, 1.4fr) minmax(9rem, 1fr) auto;
+  grid-template-columns: minmax(12rem, 1.2fr) minmax(8rem, 0.8fr) minmax(7rem, 0.7fr) minmax(18rem, 1.4fr);
   gap: 0.75rem;
   align-items: center;
   padding: 0.5rem 0.6rem;
@@ -903,6 +903,51 @@ button:disabled {
   padding: 0.7rem;
   color: var(--muted);
   font-size: 0.82rem;
+}
+
+.provider-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: flex-end;
+}
+
+.provider-action-row button {
+  padding: 0.28rem 0.45rem;
+  font-size: 0.76rem;
+}
+
+.profile-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: min(38rem, 80vw);
+}
+
+.profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(11rem, 1fr));
+  gap: 0.55rem;
+}
+
+.profile-field,
+.profile-system {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.profile-field input,
+.profile-system textarea {
+  border: 1px solid #eadfce;
+  background: #fffdf8;
+  color: var(--ink);
+  padding: 0.4rem 0.5rem;
+  border-radius: var(--radius-sm);
+  font: inherit;
 }
 
 button.danger {
@@ -1234,8 +1279,13 @@ button.danger {
 
   .provider-pull-box,
   .provider-progress,
-  .provider-model-row {
+  .provider-model-row,
+  .profile-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .provider-action-row {
+    justify-content: flex-start;
   }
 
   .gpu-status-strip {

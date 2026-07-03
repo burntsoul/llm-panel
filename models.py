@@ -4,6 +4,7 @@ import os
 import json
 import hashlib
 import logging
+import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 
@@ -22,6 +23,7 @@ _cached_at: float = 0.0
 
 # Malli-metadatan sijainti (voit vaihtaa polkua env-muuttujalla MODEL_META_PATH)
 _MODEL_META_FILE = os.getenv("MODEL_META_PATH", "model_meta.json")
+_PROFILE_BACKING_PREFIX = "llm-agent/profile-"
 _model_meta_cache: Optional[Dict[str, Dict[str, Any]]] = None
 
 # Embedding cache: {hash(model + texts): (timestamp, embedding_vector)}
@@ -52,6 +54,180 @@ def _load_meta() -> Dict[str, Dict[str, Any]]:
 
     _model_meta_cache = {}
     return _model_meta_cache
+
+
+def _write_meta(meta: Dict[str, Dict[str, Any]]) -> None:
+    meta_path = Path(_MODEL_META_FILE)
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = meta_path.with_suffix(".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2, ensure_ascii=False)
+    tmp_path.replace(meta_path)
+    _invalidate_model_meta_cache()
+
+
+def profile_backing_model_name(public_model: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", public_model.strip()).strip("-").lower()
+    if not slug:
+        slug = "model"
+    return f"{_PROFILE_BACKING_PREFIX}{slug}:latest"
+
+
+def is_profile_backing_model(model_name: str) -> bool:
+    return str(model_name or "").startswith(_PROFILE_BACKING_PREFIX)
+
+
+def _profile_meta(meta: Dict[str, Any]) -> Dict[str, Any]:
+    parameters = meta.get("profile_parameters")
+    if not isinstance(parameters, dict):
+        parameters = {}
+    return {
+        "enabled": bool(meta.get("profile_enabled")),
+        "backing_model": str(meta.get("profile_backing_model") or ""),
+        "base_model": str(meta.get("profile_base_model") or ""),
+        "parameters": parameters,
+        "system": meta.get("profile_system"),
+        "status": str(meta.get("profile_status") or ""),
+    }
+
+
+def _live_model_name_set() -> Optional[set[str]]:
+    now_models = _fetch_from_ollama()
+    if now_models is None:
+        return None
+    return {m.get("name") for m in now_models if m.get("name")}
+
+
+def get_profile_for_model(public_model: str) -> Optional[Dict[str, Any]]:
+    meta = _load_meta().get(public_model, {})
+    profile = _profile_meta(meta)
+    if not profile["enabled"]:
+        return None
+    return profile
+
+
+def resolve_model_for_upstream(public_model: str) -> str:
+    profile = get_profile_for_model(public_model)
+    if not profile:
+        return public_model
+    backing = profile.get("backing_model")
+    if not backing:
+        return public_model
+    live_set = _live_model_name_set()
+    if live_set is not None and backing not in live_set:
+        return public_model
+    return backing
+
+
+def public_model_for_backing(backing_model: str) -> Optional[str]:
+    for model_name, meta in _load_meta().items():
+        profile = _profile_meta(meta)
+        if profile["enabled"] and profile["backing_model"] == backing_model:
+            return model_name
+    return None
+
+
+def rewrite_model_ids(value: Any, public_model: str, backing_model: str) -> Any:
+    if not backing_model or backing_model == public_model:
+        return value
+    if isinstance(value, dict):
+        return {k: rewrite_model_ids(v, public_model, backing_model) for k, v in value.items()}
+    if isinstance(value, list):
+        return [rewrite_model_ids(v, public_model, backing_model) for v in value]
+    if isinstance(value, str):
+        return value.replace(backing_model, public_model)
+    return value
+
+
+def upsert_model_profile(
+    public_model: str,
+    parameters: Dict[str, Any],
+    system: Optional[str] = None,
+) -> Dict[str, Any]:
+    public_model = public_model.strip()
+    if not public_model:
+        raise ValueError("public_model is required")
+    if is_profile_backing_model(public_model):
+        raise ValueError("cannot create a profile for a private backing model")
+    meta = _load_meta().copy()
+    current = meta.get(public_model, {}).copy()
+    backing = profile_backing_model_name(public_model)
+    current.update(
+        {
+            "source": current.get("source", "local"),
+            "device": current.get("device", "gpu"),
+            "available": current.get("available", True),
+            "profile_enabled": True,
+            "profile_backing_model": backing,
+            "profile_base_model": current.get("profile_base_model") or public_model,
+            "profile_parameters": parameters,
+            "profile_system": system,
+            "profile_status": "active",
+        }
+    )
+    meta[public_model] = current
+    _write_meta(meta)
+    return current
+
+
+def delete_model_profile(public_model: str) -> Optional[Dict[str, Any]]:
+    meta = _load_meta().copy()
+    current = meta.get(public_model)
+    if not current:
+        return None
+    current = current.copy()
+    for key in [
+        "profile_enabled",
+        "profile_backing_model",
+        "profile_base_model",
+        "profile_parameters",
+        "profile_system",
+        "profile_status",
+    ]:
+        current.pop(key, None)
+    meta[public_model] = current
+    _write_meta(meta)
+    return current
+
+
+def get_model_profiles() -> List[Dict[str, Any]]:
+    rows = []
+    meta = _load_meta()
+    live_set = _live_model_name_set()
+    for model_name, values in meta.items():
+        if is_profile_backing_model(model_name):
+            continue
+        profile = _profile_meta(values)
+        if not profile["enabled"]:
+            continue
+        backing = profile["backing_model"]
+        base = profile["base_model"] or model_name
+        if live_set is None:
+            status = "unknown"
+            backing_present = None
+            base_present = None
+        else:
+            backing_present = backing in live_set
+            base_present = base in live_set
+            if backing_present:
+                status = "active"
+            elif not base_present:
+                status = "missing_base"
+            else:
+                status = "missing_backing"
+        rows.append(
+            {
+                "public_model": model_name,
+                "base_model": base,
+                "backing_model": backing,
+                "parameters": profile["parameters"],
+                "system": profile["system"],
+                "status": status,
+                "base_present": base_present,
+                "backing_present": backing_present,
+            }
+        )
+    return rows
 
 
 def _fetch_from_ollama() -> Optional[List[Dict[str, Any]]]:
@@ -113,7 +289,7 @@ def sync_model_meta_with_ollama() -> bool:
         live_model_names = set()
         for model in live_models:
             name = model.get("name")
-            if name:
+            if name and not is_profile_backing_model(name):
                 live_model_names.add(name)
         
         # 2) Lataa nykyinen model_meta.json
@@ -216,11 +392,15 @@ def get_model_names() -> List[str]:
     Palauttaa pelkät malli-id:t (esim. 'deepseek-coder:1.3b').
     (Käytettävissä jos halutaan vain string-lista.)
     """
-    return [
+    names = [
         m.get("name", "")
         for m in _get_raw_models()
-        if m.get("name")
+        if m.get("name") and not is_profile_backing_model(m.get("name", ""))
     ]
+    for name, meta in _load_meta().items():
+        if _profile_meta(meta)["enabled"] and name not in names:
+            names.append(name)
+    return names
 
 
 def _badge_for_meta(source: str, device: str) -> str:
@@ -256,17 +436,24 @@ def get_model_display_entries() -> List[Dict[str, Any]]:
     meta_map = _load_meta()
 
     entries: List[Dict[str, Any]] = []
+    seen: set[str] = set()
 
     for m in raw:
         name = m.get("name")
         if not name:
             continue
+        if is_profile_backing_model(name):
+            continue
+        seen.add(name)
 
         meta = meta_map.get(name, {})
         source = meta.get("source", "local")
         device = meta.get("device", "cpu")
+        profile = _profile_meta(meta)
 
         badge = _badge_for_meta(source, device)
+        if profile["enabled"]:
+            badge = f"profile {badge}"
         label = f"{name} ({badge})"
 
         entries.append(
@@ -275,6 +462,26 @@ def get_model_display_entries() -> List[Dict[str, Any]]:
                 "label": label,
                 "source": source,
                 "device": device,
+                "profile": profile if profile["enabled"] else None,
+            }
+        )
+
+    for name, meta in meta_map.items():
+        if name in seen or is_profile_backing_model(name):
+            continue
+        profile = _profile_meta(meta)
+        if not profile["enabled"]:
+            continue
+        source = meta.get("source", "local")
+        device = meta.get("device", "cpu")
+        badge = f"profile {_badge_for_meta(source, device)}"
+        entries.append(
+            {
+                "id": name,
+                "label": f"{name} ({badge})",
+                "source": source,
+                "device": device,
+                "profile": profile,
             }
         )
 
@@ -317,12 +524,17 @@ def get_models_openai_format() -> List[Dict[str, Any]]:
         name = m.get("name")
         if not name:
             continue
+        if is_profile_backing_model(name):
+            continue
 
         meta = meta_map.get(name, {})
         source = meta.get("source", "local")
         device = meta.get("device", "cpu")
+        profile = _profile_meta(meta)
 
         badge = _badge_for_meta(source, device)
+        if profile["enabled"]:
+            badge = f"profile {badge}"
         desc = f"{name} [{badge}]"
 
         result.append(
@@ -334,8 +546,34 @@ def get_models_openai_format() -> List[Dict[str, Any]]:
                 "metadata": {
                     "source": source,
                     "device": device,
+                    "profile": profile if profile["enabled"] else None,
                 },
                 "description": desc,
+            }
+        )
+
+    seen_names = {item["id"] for item in result}
+    for name, meta in meta_map.items():
+        if name in seen_names or is_profile_backing_model(name):
+            continue
+        profile = _profile_meta(meta)
+        if not profile["enabled"]:
+            continue
+        source = meta.get("source", "local")
+        device = meta.get("device", "cpu")
+        badge = f"profile {_badge_for_meta(source, device)}"
+        result.append(
+            {
+                "id": name,
+                "object": "model",
+                "created": base_ts + len(result),
+                "owned_by": "llm-server",
+                "metadata": {
+                    "source": source,
+                    "device": device,
+                    "profile": profile,
+                },
+                "description": f"{name} [{badge}]",
             }
         )
 
@@ -403,12 +641,19 @@ def get_model_table_status() -> List[Dict[str, Any]]:
         mid = e["id"]
         if now_set is None:
             present = None
+            base_present = None
         else:
             present = mid in now_set
+            base_present = mid in now_set
+            profile = e.get("profile") or {}
+            backing = profile.get("backing_model")
+            if profile and backing in now_set:
+                present = True
 
         row = {
             **e,
             "present_now": present,
+            "base_present_now": base_present,
         }
         rows.append(row)
 
