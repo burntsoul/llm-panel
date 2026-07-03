@@ -1327,6 +1327,49 @@ function setOllamaProviderStatus(message, isError = false) {
   node.classList.toggle("status-ok-text", !isError);
 }
 
+function setOllamaButtonsDisabled(disabled) {
+  qsa("[data-ollama-action]").forEach((btn) => {
+    btn.disabled = disabled;
+  });
+  qsa("[data-ollama-remove]").forEach((btn) => {
+    btn.disabled = disabled || btn.dataset.presentNow !== "true";
+  });
+}
+
+function setOllamaPullProgress(progress) {
+  const wrap = qs("#ollama-pull-progress-wrap");
+  const bar = qs("#ollama-pull-progress");
+  const text = qs("#ollama-pull-progress-text");
+  if (!wrap || !bar || !text) return;
+
+  const total = Number(progress && progress.total);
+  const completed = Number(progress && progress.completed);
+  const hasBytes = Number.isFinite(total) && total > 0 && Number.isFinite(completed);
+  const percent = hasBytes ? Math.max(0, Math.min(100, Math.round((completed / total) * 100))) : null;
+  const status = progress && progress.status ? progress.status : "Pulling";
+
+  wrap.classList.remove("hidden");
+  if (percent === null) {
+    bar.removeAttribute("value");
+    text.textContent = status;
+  } else {
+    bar.value = percent;
+    text.textContent = `${status} ${percent}%`;
+  }
+}
+
+function hideOllamaPullProgress() {
+  const wrap = qs("#ollama-pull-progress-wrap");
+  const bar = qs("#ollama-pull-progress");
+  const text = qs("#ollama-pull-progress-text");
+  if (wrap) wrap.classList.add("hidden");
+  if (bar) {
+    bar.value = 0;
+    bar.setAttribute("value", "0");
+  }
+  if (text) text.textContent = "";
+}
+
 function renderOllamaProviderRows(rows) {
   const body = qs("#ollama-model-table-body");
   if (!body) return;
@@ -1357,6 +1400,8 @@ function renderOllamaProviderRows(rows) {
     removeBtn.type = "button";
     removeBtn.className = "danger";
     removeBtn.textContent = "Remove";
+    removeBtn.dataset.ollamaRemove = "true";
+    removeBtn.dataset.presentNow = row.present_now === true ? "true" : "false";
     removeBtn.disabled = row.present_now !== true;
     removeBtn.addEventListener("click", () => removeOllamaModel(row.id || ""));
 
@@ -1377,6 +1422,37 @@ async function refreshOllamaProviderModels(showLoading = true) {
   }
 }
 
+function parseSseChunk(buffer, onEvent) {
+  let cursor = 0;
+  while (true) {
+    const next = buffer.indexOf("\n\n", cursor);
+    if (next === -1) break;
+
+    const rawEvent = buffer.slice(cursor, next);
+    cursor = next + 2;
+    let eventName = "message";
+    const dataLines = [];
+
+    rawEvent.split("\n").forEach((line) => {
+      if (line.startsWith("event:")) eventName = line.slice(6).trim();
+      else if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+    });
+
+    const dataText = dataLines.join("\n");
+    let data = dataText;
+    if (dataText) {
+      try {
+        data = JSON.parse(dataText);
+      } catch (_) {
+        data = dataText;
+      }
+    }
+    onEvent(eventName, data);
+  }
+
+  return buffer.slice(cursor);
+}
+
 async function pullOllamaModel() {
   const input = qs("#ollama-pull-model");
   const model = input ? input.value.trim() : "";
@@ -1385,23 +1461,54 @@ async function pullOllamaModel() {
     return;
   }
 
-  const buttons = qsa("[data-ollama-action]");
-  buttons.forEach((btn) => { btn.disabled = true; });
+  setOllamaButtonsDisabled(true);
+  hideOllamaPullProgress();
   setOllamaProviderStatus(`Pulling ${model}. This can take a while...`);
 
   try {
-    const data = await getJson("/api/providers/ollama/models/pull", {
+    const resp = await fetch("/api/providers/ollama/models/pull", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model }),
     });
-    renderOllamaProviderRows(data.models || []);
+
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status}`);
+    }
+    if (!resp.body) {
+      throw new Error("Streaming response is not available in this browser");
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let doneMessage = `Pulled ${model}.`;
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      buffer = parseSseChunk(buffer, (eventName, data) => {
+        if (eventName === "progress") {
+          setOllamaPullProgress(data);
+          setOllamaProviderStatus(data && data.status ? data.status : `Pulling ${model}...`);
+        } else if (eventName === "models") {
+          renderOllamaProviderRows(data.models || []);
+        } else if (eventName === "done") {
+          doneMessage = data && data.message ? data.message : doneMessage;
+        } else if (eventName === "error") {
+          throw new Error(data && data.error ? data.error : "pull stream failed");
+        }
+      });
+    }
+
     if (input) input.value = "";
-    setOllamaProviderStatus(data.message || `Pulled ${model}.`, false);
+    setOllamaProviderStatus(doneMessage, false);
   } catch (err) {
     setOllamaProviderStatus(`Pull failed: ${err}`, true);
   } finally {
-    buttons.forEach((btn) => { btn.disabled = false; });
+    hideOllamaPullProgress();
+    setOllamaButtonsDisabled(false);
   }
 }
 
@@ -1410,8 +1517,7 @@ async function removeOllamaModel(model) {
   if (!name) return;
   if (!window.confirm(`Remove Ollama model "${name}"?`)) return;
 
-  const buttons = qsa("[data-ollama-action], #ollama-model-table-body button");
-  buttons.forEach((btn) => { btn.disabled = true; });
+  setOllamaButtonsDisabled(true);
   setOllamaProviderStatus(`Removing ${name}...`);
 
   try {
@@ -1423,6 +1529,8 @@ async function removeOllamaModel(model) {
   } catch (err) {
     setOllamaProviderStatus(`Remove failed: ${err}`, true);
     refreshOllamaProviderModels(false);
+  } finally {
+    setOllamaButtonsDisabled(false);
   }
 }
 
@@ -1471,6 +1579,17 @@ function buildOllamaProviderSection() {
 
   pullBox.append(label, input, pullBtn, refreshBtn);
 
+  const progressWrap = document.createElement("div");
+  progressWrap.className = "provider-progress hidden";
+  progressWrap.id = "ollama-pull-progress-wrap";
+  const progress = document.createElement("progress");
+  progress.id = "ollama-pull-progress";
+  progress.max = 100;
+  progress.value = 0;
+  const progressText = document.createElement("span");
+  progressText.id = "ollama-pull-progress-text";
+  progressWrap.append(progress, progressText);
+
   const table = document.createElement("div");
   table.className = "provider-model-table";
   const head = document.createElement("div");
@@ -1489,7 +1608,7 @@ function buildOllamaProviderSection() {
   status.id = "ollama-provider-status";
   status.textContent = "Loading model inventory...";
 
-  panel.append(pullBox, table, status);
+  panel.append(pullBox, progressWrap, table, status);
   grid.appendChild(panel);
   refreshOllamaProviderModels();
 }

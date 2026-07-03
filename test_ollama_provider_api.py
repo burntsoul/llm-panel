@@ -24,7 +24,7 @@ class TestOllamaProviderApi(unittest.TestCase):
         self.assertIs(response, response_mock)
         post_mock.assert_called_once()
         self.assertTrue(post_mock.call_args.args[0].endswith("/api/pull"))
-        self.assertEqual(post_mock.call_args.kwargs["json"], {"model": "gemma4:latest", "stream": False})
+        self.assertEqual(post_mock.call_args.kwargs["json"], {"model": "gemma4:latest", "stream": True})
 
     @patch("app.requests.delete")
     def test_delete_request_calls_ollama_api(self, delete_mock):

@@ -1534,7 +1534,7 @@ def _ollama_error_message(response: requests.Response) -> str:
 def _ollama_pull_request(model: str) -> requests.Response:
     return requests.post(
         _ollama_api_url("pull"),
-        json={"model": model, "stream": False},
+        json={"model": model, "stream": True},
         timeout=None,
     )
 
@@ -1575,28 +1575,38 @@ async def api_ollama_pull_model(request: Request):
 
     await _ensure_ollama_for_management()
 
-    try:
-        loop = asyncio.get_running_loop()
-        resp = await loop.run_in_executor(
-            None,
-            lambda: _ollama_pull_request(model),
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail={"error": f"Ollama pull failed: {exc}"})
+    async def pull_events():
+        try:
+            async with httpx.AsyncClient(timeout=None) as client:
+                async with client.stream(
+                    "POST",
+                    _ollama_api_url("pull"),
+                    json={"model": model, "stream": True},
+                ) as resp:
+                    if resp.status_code >= 400:
+                        body = await resp.aread()
+                        message = body.decode("utf-8", errors="replace").strip() or f"HTTP {resp.status_code}"
+                        yield f"event: error\ndata: {json.dumps({'error': message})}\n\n"
+                        return
 
-    if not resp.ok:
-        raise HTTPException(
-            status_code=resp.status_code,
-            detail={"error": _ollama_error_message(resp)},
-        )
+                    async for line in resp.aiter_lines():
+                        if not line:
+                            continue
+                        yield f"event: progress\ndata: {line}\n\n"
 
-    rows = _refresh_ollama_model_state()
-    return {
-        "ok": True,
-        "provider": "ollama",
-        "message": f"Model '{model}' pulled.",
-        "models": rows,
-    }
+            loop = asyncio.get_running_loop()
+            rows = await loop.run_in_executor(None, _refresh_ollama_model_state)
+            done_message = f"Model '{model}' pulled."
+            yield f"event: models\ndata: {json.dumps({'models': rows})}\n\n"
+            yield f"event: done\ndata: {json.dumps({'message': done_message})}\n\n"
+        except Exception as exc:
+            yield f"event: error\ndata: {json.dumps({'error': f'Ollama pull failed: {exc}'})}\n\n"
+
+    return StreamingResponse(
+        pull_events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 @app.delete("/api/providers/ollama/models/{model:path}")
