@@ -207,7 +207,15 @@ function initSubtabs() {
 async function getJson(url, options = undefined) {
   const resp = await fetch(url, options);
   if (!resp.ok) {
-    throw new Error(`HTTP ${resp.status}`);
+    let detail = "";
+    try {
+      const data = await resp.json();
+      const error = data && data.detail ? data.detail.error || data.detail : data.error;
+      detail = error ? `: ${typeof error === "string" ? error : JSON.stringify(error)}` : "";
+    } catch (_) {
+      detail = "";
+    }
+    throw new Error(`HTTP ${resp.status}${detail}`);
   }
   return resp.json();
 }
@@ -1123,6 +1131,7 @@ function buildGpuStatusSection() {
   }
   grid.innerHTML = "";
   grid.classList.add("gpu-status-grid");
+  grid.classList.remove("provider-grid");
 
   const panel = document.createElement("div");
   panel.className = "gpu-status-panel";
@@ -1310,6 +1319,181 @@ function syncGpuStatusAutoRefresh() {
   }
 }
 
+function setOllamaProviderStatus(message, isError = false) {
+  const node = qs("#ollama-provider-status");
+  if (!node) return;
+  node.textContent = message;
+  node.classList.toggle("status-error", !!isError);
+  node.classList.toggle("status-ok-text", !isError);
+}
+
+function renderOllamaProviderRows(rows) {
+  const body = qs("#ollama-model-table-body");
+  if (!body) return;
+  body.innerHTML = "";
+
+  if (!rows || !rows.length) {
+    const empty = document.createElement("div");
+    empty.className = "provider-model-empty";
+    empty.textContent = "No models reported by Ollama.";
+    body.appendChild(empty);
+    return;
+  }
+
+  rows.forEach((row) => {
+    const item = document.createElement("div");
+    item.className = "provider-model-row";
+
+    const name = document.createElement("strong");
+    name.textContent = row.id || "";
+
+    const meta = document.createElement("span");
+    let status = "unknown";
+    if (row.present_now === true) status = "present";
+    else if (row.present_now === false) status = "missing";
+    meta.textContent = `${status} / ${row.source || "local"} / ${row.device || "unknown"}`;
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "danger";
+    removeBtn.textContent = "Remove";
+    removeBtn.disabled = row.present_now !== true;
+    removeBtn.addEventListener("click", () => removeOllamaModel(row.id || ""));
+
+    item.append(name, meta, removeBtn);
+    body.appendChild(item);
+  });
+}
+
+async function refreshOllamaProviderModels(showLoading = true) {
+  if (showLoading) setOllamaProviderStatus("Refreshing model inventory...");
+
+  try {
+    const data = await getJson("/api/models");
+    renderOllamaProviderRows(data.models || []);
+    setOllamaProviderStatus(`Loaded ${(data.models || []).length} models.`, false);
+  } catch (err) {
+    setOllamaProviderStatus(`Model refresh failed: ${err}`, true);
+  }
+}
+
+async function pullOllamaModel() {
+  const input = qs("#ollama-pull-model");
+  const model = input ? input.value.trim() : "";
+  if (!model) {
+    setOllamaProviderStatus("Enter a model name to pull.", true);
+    return;
+  }
+
+  const buttons = qsa("[data-ollama-action]");
+  buttons.forEach((btn) => { btn.disabled = true; });
+  setOllamaProviderStatus(`Pulling ${model}. This can take a while...`);
+
+  try {
+    const data = await getJson("/api/providers/ollama/models/pull", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model }),
+    });
+    renderOllamaProviderRows(data.models || []);
+    if (input) input.value = "";
+    setOllamaProviderStatus(data.message || `Pulled ${model}.`, false);
+  } catch (err) {
+    setOllamaProviderStatus(`Pull failed: ${err}`, true);
+  } finally {
+    buttons.forEach((btn) => { btn.disabled = false; });
+  }
+}
+
+async function removeOllamaModel(model) {
+  const name = String(model || "").trim();
+  if (!name) return;
+  if (!window.confirm(`Remove Ollama model "${name}"?`)) return;
+
+  const buttons = qsa("[data-ollama-action], #ollama-model-table-body button");
+  buttons.forEach((btn) => { btn.disabled = true; });
+  setOllamaProviderStatus(`Removing ${name}...`);
+
+  try {
+    const data = await getJson(`/api/providers/ollama/models/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    });
+    renderOllamaProviderRows(data.models || []);
+    setOllamaProviderStatus(data.message || `Removed ${name}.`, false);
+  } catch (err) {
+    setOllamaProviderStatus(`Remove failed: ${err}`, true);
+    refreshOllamaProviderModels(false);
+  }
+}
+
+function buildOllamaProviderSection() {
+  const grid = qs("#settings-field-grid");
+  if (!grid) return;
+  if (gpuStatusChart) {
+    gpuStatusChart.destroy();
+    gpuStatusChart = null;
+  }
+  grid.innerHTML = "";
+  grid.classList.remove("gpu-status-grid");
+  grid.classList.add("provider-grid");
+
+  const panel = document.createElement("div");
+  panel.className = "provider-panel";
+
+  const pullBox = document.createElement("div");
+  pullBox.className = "provider-pull-box";
+
+  const label = document.createElement("label");
+  label.htmlFor = "ollama-pull-model";
+  label.textContent = "Model to pull";
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.id = "ollama-pull-model";
+  input.placeholder = "qwen2.5-coder:7b";
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") pullOllamaModel();
+  });
+
+  const pullBtn = document.createElement("button");
+  pullBtn.type = "button";
+  pullBtn.className = "primary";
+  pullBtn.dataset.ollamaAction = "pull";
+  pullBtn.textContent = "Pull";
+  pullBtn.addEventListener("click", pullOllamaModel);
+
+  const refreshBtn = document.createElement("button");
+  refreshBtn.type = "button";
+  refreshBtn.className = "secondary";
+  refreshBtn.dataset.ollamaAction = "refresh";
+  refreshBtn.textContent = "Refresh";
+  refreshBtn.addEventListener("click", () => refreshOllamaProviderModels());
+
+  pullBox.append(label, input, pullBtn, refreshBtn);
+
+  const table = document.createElement("div");
+  table.className = "provider-model-table";
+  const head = document.createElement("div");
+  head.className = "provider-model-row provider-model-head";
+  ["Model", "State", "Action"].forEach((text) => {
+    const node = document.createElement("span");
+    node.textContent = text;
+    head.appendChild(node);
+  });
+  const body = document.createElement("div");
+  body.id = "ollama-model-table-body";
+  table.append(head, body);
+
+  const status = document.createElement("p");
+  status.className = "settings-save-status muted";
+  status.id = "ollama-provider-status";
+  status.textContent = "Loading model inventory...";
+
+  panel.append(pullBox, table, status);
+  grid.appendChild(panel);
+  refreshOllamaProviderModels();
+}
+
 function renderSettingsSection(sectionId) {
   const sections = settingsData && settingsData.sections ? settingsData.sections : {};
   if (!settingsAdvanced && sections[sectionId] && sections[sectionId].advanced) {
@@ -1342,9 +1526,22 @@ function renderSettingsSection(sectionId) {
     return;
   }
 
+  if (section.custom === "provider_ollama") {
+    buildOllamaProviderSection();
+    const table = qs("#settings-effective-table");
+    if (table) table.innerHTML = "";
+    const effectiveWrap = qs("#settings-effective-wrap");
+    if (effectiveWrap) effectiveWrap.classList.add("hidden");
+    setSettingsSaveStatus("Provider model management.");
+    updateSettingsSaveButton(section);
+    syncGpuStatusAutoRefresh();
+    return;
+  }
+
   const grid = qs("#settings-field-grid");
   if (grid) {
     grid.classList.remove("gpu-status-grid");
+    grid.classList.remove("provider-grid");
     grid.innerHTML = "";
     if (section.error) {
       const card = document.createElement("div");

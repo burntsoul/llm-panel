@@ -81,6 +81,14 @@ def _invalidate_model_meta_cache() -> None:
     _model_meta_cache = None
 
 
+def invalidate_model_cache() -> None:
+    """Clear cached Ollama model list and local metadata."""
+    global _cached_models_raw, _cached_at
+    _cached_models_raw = None
+    _cached_at = 0.0
+    _invalidate_model_meta_cache()
+
+
 def sync_model_meta_with_ollama() -> bool:
     """
     Synkronoi model_meta.json Live Ollama-mallien kanssa.

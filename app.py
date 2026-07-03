@@ -46,6 +46,8 @@ from models import (
     get_embedding_models_openai_format,
     get_cached_embeddings,
     cache_embeddings,
+    invalidate_model_cache,
+    sync_model_meta_with_ollama,
 )
 from lease_api import router as lease_api_router
 from comfyui_service import (
@@ -1302,6 +1304,11 @@ def api_settings_effective():
                 "error": gpu_watchdog_curve_error,
                 "fields": gpu_watchdog_curve_fields,
             },
+            "provider_ollama": {
+                "title": "Ollama provider",
+                "custom": "provider_ollama",
+                "fields": [],
+            },
         },
     }
 
@@ -1492,6 +1499,136 @@ def api_models():
     """
     rows = get_model_table_status()
     return {"models": rows}
+
+
+def _ollama_api_url(path: str) -> str:
+    return f"{settings.LLM_SERVER_BASE.rstrip('/')}/api/{path.lstrip('/')}"
+
+
+async def _ensure_ollama_for_management() -> None:
+    ready = await ensure_llm_running_and_ready()
+    if not ready:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "Ollama provider is not available"},
+        )
+
+
+def _refresh_ollama_model_state() -> list[dict]:
+    invalidate_model_cache()
+    sync_model_meta_with_ollama()
+    invalidate_model_cache()
+    return get_model_table_status()
+
+
+def _ollama_error_message(response: requests.Response) -> str:
+    try:
+        data = response.json()
+    except Exception:
+        return response.text.strip() or f"HTTP {response.status_code}"
+    if isinstance(data, dict):
+        return str(data.get("error") or data.get("message") or data)
+    return str(data)
+
+
+def _ollama_pull_request(model: str) -> requests.Response:
+    return requests.post(
+        _ollama_api_url("pull"),
+        json={"model": model, "stream": False},
+        timeout=None,
+    )
+
+
+def _ollama_delete_request(model: str) -> requests.Response:
+    return requests.delete(
+        _ollama_api_url("delete"),
+        json={"model": model},
+        timeout=30,
+    )
+
+
+@app.get("/api/providers/ollama/models")
+async def api_ollama_provider_models():
+    await _ensure_ollama_for_management()
+    rows = _refresh_ollama_model_state()
+    return {
+        "ok": True,
+        "provider": "ollama",
+        "base_url": settings.LLM_SERVER_BASE,
+        "models": rows,
+    }
+
+
+@app.post("/api/providers/ollama/models/pull")
+async def api_ollama_pull_model(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail={"error": "invalid JSON body"})
+
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail={"error": "body must be a JSON object"})
+
+    model = str(body.get("model") or "").strip()
+    if not model:
+        raise HTTPException(status_code=400, detail={"error": "model is required"})
+
+    await _ensure_ollama_for_management()
+
+    try:
+        loop = asyncio.get_running_loop()
+        resp = await loop.run_in_executor(
+            None,
+            lambda: _ollama_pull_request(model),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail={"error": f"Ollama pull failed: {exc}"})
+
+    if not resp.ok:
+        raise HTTPException(
+            status_code=resp.status_code,
+            detail={"error": _ollama_error_message(resp)},
+        )
+
+    rows = _refresh_ollama_model_state()
+    return {
+        "ok": True,
+        "provider": "ollama",
+        "message": f"Model '{model}' pulled.",
+        "models": rows,
+    }
+
+
+@app.delete("/api/providers/ollama/models/{model:path}")
+async def api_ollama_delete_model(model: str):
+    model = str(model or "").strip()
+    if not model:
+        raise HTTPException(status_code=400, detail={"error": "model is required"})
+
+    await _ensure_ollama_for_management()
+
+    try:
+        loop = asyncio.get_running_loop()
+        resp = await loop.run_in_executor(
+            None,
+            lambda: _ollama_delete_request(model),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail={"error": f"Ollama delete failed: {exc}"})
+
+    if not resp.ok:
+        raise HTTPException(
+            status_code=resp.status_code,
+            detail={"error": _ollama_error_message(resp)},
+        )
+
+    rows = _refresh_ollama_model_state()
+    return {
+        "ok": True,
+        "provider": "ollama",
+        "message": f"Model '{model}' removed.",
+        "models": rows,
+    }
 
 @app.get("/models", response_class=HTMLResponse)
 def models_page():

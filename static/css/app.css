@@ -800,6 +800,98 @@ button:disabled {
   display: block;
 }
 
+#settings-field-grid.provider-grid {
+  display: block;
+}
+
+.provider-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.provider-pull-box {
+  display: grid;
+  grid-template-columns: minmax(9rem, 1fr) auto auto;
+  gap: 0.5rem;
+  align-items: end;
+  padding: 0.6rem;
+  border: 1px solid #e5d8c6;
+  background: #fff8ee;
+  border-radius: var(--radius-sm);
+}
+
+.provider-pull-box label {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.provider-pull-box input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #eadfce;
+  background: #fffdf8;
+  color: var(--ink);
+  padding: 0.42rem 0.5rem;
+  border-radius: var(--radius-sm);
+}
+
+.provider-model-table {
+  border: 1px solid #e5d8c6;
+  background: #fff8ee;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.provider-model-row {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1.4fr) minmax(9rem, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid #ece0d0;
+  font-size: 0.8rem;
+}
+
+.provider-model-row:last-child {
+  border-bottom: none;
+}
+
+.provider-model-row strong,
+.provider-model-row span {
+  overflow-wrap: anywhere;
+}
+
+.provider-model-row span {
+  color: var(--muted);
+}
+
+.provider-model-head {
+  background: #f2e5d4;
+  color: #2a1c12;
+  font-weight: 700;
+}
+
+.provider-model-head span {
+  color: #2a1c12;
+}
+
+.provider-model-empty {
+  padding: 0.7rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+button.danger {
+  border-color: rgba(196, 60, 43, 0.35);
+  background: rgba(196, 60, 43, 0.1);
+  color: var(--bad);
+}
+
 .gpu-status-panel {
   display: flex;
   flex-direction: column;
@@ -1119,6 +1211,11 @@ button:disabled {
 
   .settings-row em {
     text-align: left;
+  }
+
+  .provider-pull-box,
+  .provider-model-row {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .gpu-status-strip {
