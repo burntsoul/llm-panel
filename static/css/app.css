@@ -658,6 +658,58 @@ button:disabled {
   font-size: 0.74rem;
 }
 
+.settings-field label,
+.settings-field b {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.settings-help {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  border: 1px solid #d7c5ad;
+  background: #fffdf8;
+  color: var(--muted);
+  border-radius: 50%;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+}
+
+.settings-help::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  z-index: 20;
+  left: 50%;
+  bottom: calc(100% + 0.45rem);
+  width: min(18rem, 70vw);
+  transform: translateX(-50%);
+  padding: 0.5rem 0.6rem;
+  border: 1px solid #d7c5ad;
+  background: #2f2a24;
+  color: #fffaf2;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  font-size: 0.74rem;
+  font-weight: 500;
+  line-height: 1.35;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.settings-help:hover::after,
+.settings-help:focus::after {
+  opacity: 1;
+}
+
 .settings-field .settings-value {
   display: block;
   min-height: 1.8rem;
@@ -742,6 +794,140 @@ button:disabled {
   color: var(--muted);
   font-style: normal;
   text-align: right;
+}
+
+#settings-field-grid.gpu-status-grid {
+  display: block;
+}
+
+.gpu-status-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.gpu-status-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.6rem;
+  padding: 0.6rem;
+  border: 1px solid #e5d8c6;
+  background: #fff8ee;
+  border-radius: var(--radius-sm);
+}
+
+.gpu-status-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.gpu-status-toolbar-left,
+.gpu-status-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.gpu-status-segmented {
+  display: inline-grid;
+  grid-template-columns: repeat(5, minmax(3.2rem, auto));
+  border: 1px solid #d2c4b3;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.gpu-status-segmented button {
+  min-width: 3.2rem;
+  min-height: 2rem;
+  padding: 0 0.7rem;
+  border: 0;
+  border-right: 1px solid #d2c4b3;
+  border-radius: 0;
+  background: #fffdf8;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.gpu-status-segmented button:last-child {
+  border-right: 0;
+}
+
+.gpu-status-segmented button.active {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.gpu-status-toggles {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(110px, max-content));
+  gap: 0.45rem 0.9rem;
+  align-items: center;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.gpu-status-toggles label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.gpu-status-strip {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(100px, 1fr));
+  gap: 0.55rem;
+}
+
+.gpu-status-stat {
+  min-height: 3.4rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid #e5d8c6;
+  background: #fff8ee;
+  border-radius: var(--radius-sm);
+}
+
+.gpu-status-stat span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.gpu-status-stat strong {
+  display: block;
+  margin-top: 0.25rem;
+  overflow-wrap: anywhere;
+  font-size: 1rem;
+  line-height: 1.15;
+}
+
+.gpu-status-chart-wrap {
+  position: relative;
+  height: 420px;
+  min-height: 360px;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #e5d8c6;
+  background: #fffdf8;
+  border-radius: var(--radius-sm);
+  padding: 0.75rem;
+}
+
+.gpu-status-chart-wrap canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
 }
 
 .muted {
@@ -933,6 +1119,24 @@ button:disabled {
 
   .settings-row em {
     text-align: left;
+  }
+
+  .gpu-status-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .gpu-status-toggles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .gpu-status-segmented {
+    width: 100%;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .gpu-status-chart-wrap {
+    height: 320px;
+    min-height: 280px;
   }
 
   .panel-grid.two-col {

@@ -59,6 +59,7 @@ from comfyui_service import (
 )
 from gpu_telemetry import get_gpu_telemetry
 from gpu_watchdog import GPUWatchdogService, parse_watchdog_control_payload
+from gpu_history import DEFAULT_DB_PATH, GpuHistoryError, get_gpu_history, init_gpu_history_db, prune_gpu_history, record_gpu_status_sample
 from ilo_fan import set_ilo_fan_min, get_last_fan_command_result
 from logging_setup import configure_logging
 
@@ -75,16 +76,22 @@ templates = Jinja2Templates(directory="templates")
 app.include_router(lease_api_router)
 
 
+def _gpu_history_db_path():
+    return getattr(app.state, "gpu_history_db_path", DEFAULT_DB_PATH)
+
+
 @app.on_event("startup")
 async def _startup():
     configure_logging(settings.LOG_FILE, settings.LOG_LEVEL)
+    init_gpu_history_db(_gpu_history_db_path())
+    prune_gpu_history(_gpu_history_db_path())
     # Käynnistä idle-shutdown -looppi taustalle
     asyncio.create_task(idle_shutdown_loop())
     # Käynnistä CPU-aktiviteetin polleri
     asyncio.create_task(cpu_activity_poller())
     # Käynnistä ComfyUI idle-shutdown looppi
     asyncio.create_task(comfyui_idle_shutdown_loop())
-    app.state.gpu_watchdog = GPUWatchdogService()
+    app.state.gpu_watchdog = GPUWatchdogService(sample_recorder=record_gpu_status_sample)
     await app.state.gpu_watchdog.start()
 
 
@@ -1059,6 +1066,14 @@ def api_gpu_watchdog_status():
     return watchdog.get_status()
 
 
+@app.get("/api/gpu_status/history")
+def api_gpu_status_history(window: str = "15m"):
+    try:
+        return get_gpu_history(window=window, path=_gpu_history_db_path())
+    except GpuHistoryError as exc:
+        raise HTTPException(status_code=400, detail={"error": str(exc)})
+
+
 @app.post("/api/gpu_watchdog/control")
 async def api_gpu_watchdog_control(request: Request):
     watchdog = getattr(app.state, "gpu_watchdog", None)
@@ -1266,6 +1281,11 @@ def api_settings_effective():
                     {"key": "WATCHDOG_POLL_SECONDS", "label": "Watchdog poll", "value": settings.WATCHDOG_POLL_SECONDS, "type": "number", "unit": "s", "source": "config", "editable": False},
                 ],
             },
+            "gpu_status": {
+                "title": "GPU status",
+                "custom": "gpu_status",
+                "fields": [],
+            },
             "gpu_fan_control": {
                 "title": "GPU fan control",
                 "editable": gpu_fan_control_editable,
@@ -1313,9 +1333,14 @@ def _refresh_gpu_watchdog_curve_settings_from_store() -> None:
     settings.GPU_WATCHDOG_MIN_FAN_XX = int(effective["min_fan_xx"].value)
     settings.GPU_WATCHDOG_MAX_FAN_XX = int(effective["max_fan_xx"].value)
     settings.GPU_WATCHDOG_PI_KP = float(effective["kp"].value)
+    settings.GPU_WATCHDOG_OVER_TARGET_KP = float(effective["over_target_kp"].value)
     settings.GPU_WATCHDOG_PI_KI = float(effective["ki"].value)
     settings.GPU_WATCHDOG_PI_INTEGRAL_CLAMP = float(effective["integral_clamp"].value)
     settings.GPU_WATCHDOG_SMOOTHING_ALPHA = float(effective["smoothing_alpha"].value)
+    settings.GPU_WATCHDOG_DERIVATIVE_LOOKAHEAD_SECONDS = float(effective["derivative_lookahead_seconds"].value)
+    settings.GPU_WATCHDOG_DERIVATIVE_SMOOTHING_ALPHA = float(effective["derivative_smoothing_alpha"].value)
+    settings.GPU_WATCHDOG_COOLDOWN_RELEASE_BELOW_TARGET_C = float(effective["cooldown_release_below_target_c"].value)
+    settings.GPU_WATCHDOG_COOLDOWN_RELEASE_GPU_UTIL_PERCENT = float(effective["cooldown_release_gpu_util_percent"].value)
     settings.GPU_WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS = float(effective["command_min_interval_seconds"].value)
     settings.GPU_WATCHDOG_COMMAND_MIN_DELTA_XX = int(effective["command_min_delta_xx"].value)
     settings.GPU_WATCHDOG_MAX_STEP_UP_XX = int(effective["max_step_up_xx"].value)

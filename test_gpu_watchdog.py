@@ -38,20 +38,25 @@ class TestGpuWatchdog(unittest.IsolatedAsyncioTestCase):
             patch("gpu_watchdog.settings.ILO_USER", "Administrator"),
             patch("gpu_watchdog.settings.ILO_PASSWORD", "secret"),
             patch("gpu_watchdog.settings.WATCHDOG_ENABLED", True),
-            patch("gpu_watchdog.settings.WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS", 20.0),
+            patch("gpu_watchdog.settings.WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS", 10.0),
             patch("gpu_watchdog.settings.WATCHDOG_FAILSAFE_FAN_MIN_XX", 190),
-            patch("gpu_watchdog.settings.WATCHDOG_POLL_SECONDS", 5.0),
+            patch("gpu_watchdog.settings.WATCHDOG_POLL_SECONDS", 3.0),
             patch("gpu_watchdog.settings.WATCHDOG_TELEMETRY_STALE_SECONDS", 15.0),
             patch("gpu_watchdog.settings.WATCHDOG_LOG_TRANSITIONS_ONLY", True),
             patch("gpu_watchdog.settings.GPU_WATCHDOG_TARGET_TEMP_C", 72.0),
             patch("gpu_watchdog.settings.GPU_WATCHDOG_MIN_FAN_XX", 40),
             patch("gpu_watchdog.settings.GPU_WATCHDOG_MAX_FAN_XX", 230),
-            patch("gpu_watchdog.settings.GPU_WATCHDOG_PI_KP", 14.0),
-            patch("gpu_watchdog.settings.GPU_WATCHDOG_PI_KI", 0.08),
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_PI_KP", 8.0),
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_OVER_TARGET_KP", 8.0),
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_PI_KI", 0.06),
             patch("gpu_watchdog.settings.GPU_WATCHDOG_PI_INTEGRAL_CLAMP", 800.0),
-            patch("gpu_watchdog.settings.GPU_WATCHDOG_SMOOTHING_ALPHA", 0.25),
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_SMOOTHING_ALPHA", 0.45),
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_DERIVATIVE_LOOKAHEAD_SECONDS", 20.0),
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_DERIVATIVE_SMOOTHING_ALPHA", 0.35),
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_COOLDOWN_RELEASE_BELOW_TARGET_C", 3.0),
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_COOLDOWN_RELEASE_GPU_UTIL_PERCENT", 10.0),
             patch("gpu_watchdog.settings.GPU_WATCHDOG_COMMAND_MIN_DELTA_XX", 5),
-            patch("gpu_watchdog.settings.GPU_WATCHDOG_MAX_STEP_UP_XX", 20),
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_MAX_STEP_UP_XX", 30),
             patch("gpu_watchdog.settings.GPU_WATCHDOG_MAX_STEP_DOWN_XX", 10),
             patch("gpu_watchdog.settings.GPU_WATCHDOG_EMERGENCY_TEMP_C", 84.0),
             patch("gpu_watchdog.settings.GPU_WATCHDOG_EMERGENCY_FAN_XX", 230),
@@ -76,9 +81,48 @@ class TestGpuWatchdog(unittest.IsolatedAsyncioTestCase):
 
         status = svc.get_status()
         self.assertEqual(status["mode"], MODE_AUTO)
-        self.assertEqual(status["controller"], "pi")
+        self.assertEqual(status["controller"], "pid_predictive")
         self.assertGreater(status["desired_fan_xx"], 40)
-        self.assertEqual(calls, [83])
+        self.assertEqual(calls, [89])
+
+    async def test_records_history_sample_after_step(self):
+        patches = self._settings_patches()
+        for p in patches:
+            p.start()
+        self.addCleanup(lambda: [p.stop() for p in patches])
+
+        samples = []
+        svc = GPUWatchdogService(
+            telemetry_getter=lambda: _telemetry_sample(75.0),
+            fan_setter=lambda xx: {"ok": True, "timestamp": "2026-01-01T00:00:01Z"},
+            vm_state_getter=lambda: "running",
+            sample_recorder=samples.append,
+        )
+        await svc.step_once()
+
+        self.assertEqual(len(samples), 1)
+        self.assertEqual(samples[0]["mode"], MODE_AUTO)
+
+    async def test_history_recorder_failure_does_not_break_step(self):
+        patches = self._settings_patches()
+        for p in patches:
+            p.start()
+        self.addCleanup(lambda: [p.stop() for p in patches])
+
+        def recorder(_status):
+            raise RuntimeError("db unavailable")
+
+        svc = GPUWatchdogService(
+            telemetry_getter=lambda: _telemetry_sample(75.0),
+            fan_setter=lambda xx: {"ok": True, "timestamp": "2026-01-01T00:00:01Z"},
+            vm_state_getter=lambda: "running",
+            sample_recorder=recorder,
+        )
+        with self.assertLogs("gpu_watchdog", level="WARNING") as captured:
+            await svc.step_once()
+
+        self.assertIn("GPU history sample recording failed", "\n".join(captured.output))
+        self.assertEqual(svc.get_status()["mode"], MODE_AUTO)
 
     async def test_pi_integral_accumulates_and_is_clamped(self):
         patches = self._settings_patches()
@@ -129,23 +173,190 @@ class TestGpuWatchdog(unittest.IsolatedAsyncioTestCase):
             p.start()
         self.addCleanup(lambda: [p.stop() for p in patches])
 
-        temps = {"value": 60.0}
-        now_value = {"t": 0.0}
-        svc = GPUWatchdogService(
-            telemetry_getter=lambda: _telemetry_sample(temps["value"]),
-            fan_setter=lambda xx: {"ok": True, "timestamp": "2026-01-01T00:00:01Z"},
-            vm_state_getter=lambda: "running",
-            monotonic_fn=lambda: now_value["t"],
-        )
-        await svc.step_once()
+        with patch("gpu_watchdog.settings.GPU_WATCHDOG_DERIVATIVE_LOOKAHEAD_SECONDS", 0.0):
+            temps = {"value": 60.0}
+            now_value = {"t": 0.0}
+            svc = GPUWatchdogService(
+                telemetry_getter=lambda: _telemetry_sample(temps["value"]),
+                fan_setter=lambda xx: {"ok": True, "timestamp": "2026-01-01T00:00:01Z"},
+                vm_state_getter=lambda: "running",
+                monotonic_fn=lambda: now_value["t"],
+            )
+            await svc.step_once()
 
-        temps["value"] = 80.0
-        now_value["t"] = 25.0
-        await svc.step_once()
+            temps["value"] = 80.0
+            now_value["t"] = 25.0
+            await svc.step_once()
 
         status = svc.get_status()
-        self.assertAlmostEqual(status["smoothed_temp_c"], 65.0)
-        self.assertLess(status["desired_fan_xx"], 80)
+        self.assertAlmostEqual(status["smoothed_temp_c"], 69.0)
+        self.assertLess(status["desired_fan_xx"], 110)
+
+    async def test_derivative_lookahead_reacts_before_target_temp(self):
+        patches = self._settings_patches()
+        for p in patches:
+            p.start()
+        self.addCleanup(lambda: [p.stop() for p in patches])
+
+        with (
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_SMOOTHING_ALPHA", 1.0),
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_DERIVATIVE_SMOOTHING_ALPHA", 1.0),
+            patch("gpu_watchdog.settings.WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS", 0.0),
+        ):
+            temps = {"value": 60.0}
+            calls = []
+            now_value = {"t": 0.0}
+
+            def telemetry_getter():
+                sample = _telemetry_sample(temps["value"])
+                sample["gpu_util_percent"] = 90.0
+                return sample
+
+            svc = GPUWatchdogService(
+                telemetry_getter=telemetry_getter,
+                fan_setter=lambda xx: calls.append(xx) or {"ok": True, "timestamp": "2026-01-01T00:00:01Z"},
+                vm_state_getter=lambda: "running",
+                monotonic_fn=lambda: now_value["t"],
+            )
+            await svc.step_once()
+
+            temps["value"] = 62.0
+            now_value["t"] = 3.0
+            await svc.step_once()
+
+        status = svc.get_status()
+        self.assertLess(status["smoothed_temp_c"], status["target_temp_c"])
+        self.assertGreater(status["projected_temp_c"], status["target_temp_c"])
+        self.assertGreater(status["control_error_c"], 0.0)
+        self.assertEqual(calls, [40, 67])
+
+    async def test_derivative_lookahead_resets_when_temperature_falls(self):
+        patches = self._settings_patches()
+        for p in patches:
+            p.start()
+        self.addCleanup(lambda: [p.stop() for p in patches])
+
+        with (
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_SMOOTHING_ALPHA", 1.0),
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_DERIVATIVE_SMOOTHING_ALPHA", 1.0),
+            patch("gpu_watchdog.settings.WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS", 0.0),
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_MAX_STEP_DOWN_XX", 255),
+        ):
+            temps = {"value": 60.0}
+            utils = {"value": 90.0}
+            calls = []
+            now_value = {"t": 0.0}
+
+            def telemetry_getter():
+                sample = _telemetry_sample(temps["value"])
+                sample["gpu_util_percent"] = utils["value"]
+                return sample
+
+            svc = GPUWatchdogService(
+                telemetry_getter=telemetry_getter,
+                fan_setter=lambda xx: calls.append(xx) or {"ok": True, "timestamp": "2026-01-01T00:00:01Z"},
+                vm_state_getter=lambda: "running",
+                monotonic_fn=lambda: now_value["t"],
+            )
+            await svc.step_once()
+
+            temps["value"] = 66.0
+            now_value["t"] = 3.0
+            await svc.step_once()
+            self.assertGreater(svc.get_status()["projected_temp_c"], svc.get_status()["target_temp_c"])
+
+            temps["value"] = 64.0
+            utils["value"] = 0.0
+            now_value["t"] = 6.0
+            await svc.step_once()
+
+        status = svc.get_status()
+        self.assertEqual(status["temp_rate_c_per_s"], 0.0)
+        self.assertEqual(status["projected_temp_c"], status["smoothed_temp_c"])
+        self.assertEqual(status["control_error_c"], 0.0)
+        self.assertEqual(calls, [40, 70, 40])
+
+    async def test_cooldown_release_clears_stored_heat_pressure(self):
+        patches = self._settings_patches()
+        for p in patches:
+            p.start()
+        self.addCleanup(lambda: [p.stop() for p in patches])
+
+        with (
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_PI_INTEGRAL_CLAMP", 2000.0),
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_MAX_STEP_DOWN_XX", 20),
+            patch("gpu_watchdog.settings.WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS", 0.0),
+        ):
+            temps = {"value": 82.0}
+            utils = {"value": 90.0}
+            calls = []
+            now_value = {"t": 0.0}
+
+            def telemetry_getter():
+                sample = _telemetry_sample(temps["value"])
+                sample["gpu_util_percent"] = utils["value"]
+                return sample
+
+            svc = GPUWatchdogService(
+                telemetry_getter=telemetry_getter,
+                fan_setter=lambda xx: calls.append(xx) or {"ok": True, "timestamp": "2026-01-01T00:00:01Z"},
+                vm_state_getter=lambda: "running",
+                monotonic_fn=lambda: now_value["t"],
+            )
+
+            await svc.step_once()
+            temps["value"] = 82.0
+            now_value["t"] = 3.0
+            await svc.step_once()
+            self.assertGreater(svc.get_status()["pi_integral"], 0.0)
+
+            temps["value"] = 47.0
+            utils["value"] = 0.0
+            now_value["t"] = 6.0
+            await svc.step_once()
+
+        status = svc.get_status()
+        self.assertTrue(status["cooldown_release_active"])
+        self.assertEqual(status["pi_integral"], 0.0)
+        self.assertEqual(status["desired_fan_xx"], status["min_fan_xx"])
+        self.assertEqual(status["control_error_c"], 0.0)
+        self.assertLess(calls[-1], calls[-2])
+
+    async def test_cooldown_release_step_down_is_not_blocked_by_command_delta(self):
+        patches = self._settings_patches()
+        for p in patches:
+            p.start()
+        self.addCleanup(lambda: [p.stop() for p in patches])
+
+        with (
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_MAX_STEP_DOWN_XX", 4),
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_COMMAND_MIN_DELTA_XX", 5),
+            patch("gpu_watchdog.settings.WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS", 0.0),
+        ):
+            temps = {"value": 82.0}
+            utils = {"value": 90.0}
+            calls = []
+            now_value = {"t": 0.0}
+
+            def telemetry_getter():
+                sample = _telemetry_sample(temps["value"])
+                sample["gpu_util_percent"] = utils["value"]
+                return sample
+
+            svc = GPUWatchdogService(
+                telemetry_getter=telemetry_getter,
+                fan_setter=lambda xx: calls.append(xx) or {"ok": True, "timestamp": "2026-01-01T00:00:01Z"},
+                vm_state_getter=lambda: "running",
+                monotonic_fn=lambda: now_value["t"],
+            )
+            await svc.step_once()
+
+            temps["value"] = 47.0
+            utils["value"] = 0.0
+            now_value["t"] = 3.0
+            await svc.step_once()
+
+        self.assertEqual(calls, [202, 197])
 
     async def test_failsafe_on_telemetry_error(self):
         patches = self._settings_patches()
@@ -202,16 +413,16 @@ class TestGpuWatchdog(unittest.IsolatedAsyncioTestCase):
         )
 
         await svc.step_once()
-        self.assertEqual(calls, [83])
+        self.assertEqual(calls, [89])
         self.assertEqual(svc.get_status()["mode"], MODE_AUTO)
 
         temps["value"] = 82.0
         await svc.step_once()
-        self.assertEqual(calls, [83])
+        self.assertEqual(calls, [89])
 
-        now_value["t"] = 21.0
+        now_value["t"] = 11.0
         await svc.step_once()
-        self.assertEqual(calls, [83, 103])
+        self.assertEqual(calls, [89, 119])
 
     async def test_command_delta_suppresses_tiny_changes(self):
         patches = self._settings_patches()
@@ -234,7 +445,7 @@ class TestGpuWatchdog(unittest.IsolatedAsyncioTestCase):
         now_value["t"] = 25.0
         await svc.step_once()
 
-        self.assertEqual(calls, [83])
+        self.assertEqual(calls, [89])
 
     async def test_max_step_down_limits_normal_decrease(self):
         patches = self._settings_patches()
@@ -252,13 +463,13 @@ class TestGpuWatchdog(unittest.IsolatedAsyncioTestCase):
             monotonic_fn=lambda: now_value["t"],
         )
         await svc.step_once()
-        self.assertEqual(calls, [184])
+        self.assertEqual(calls, [202])
 
         temps["value"] = 50.0
         now_value["t"] = 25.0
         await svc.step_once()
 
-        self.assertEqual(calls, [184, 174])
+        self.assertEqual(calls, [202, 192])
 
     async def test_emergency_temp_bypasses_ramp_and_interval(self):
         patches = self._settings_patches()
@@ -280,7 +491,7 @@ class TestGpuWatchdog(unittest.IsolatedAsyncioTestCase):
         temps["value"] = 86.0
         await svc.step_once()
 
-        self.assertEqual(calls, [83, 230])
+        self.assertEqual(calls, [89, 230])
 
     async def test_vm_stopped_uses_vm_off_idle_mode(self):
         patches = self._settings_patches()

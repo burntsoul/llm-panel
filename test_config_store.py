@@ -40,6 +40,11 @@ class TestConfigStore(unittest.TestCase):
         self.assertEqual(config.gpu.fan_control.ilo_fan_patch_index, 3)
         self.assertEqual(config.gpu.fan_control.ilo_sshpass_path, "sshpass")
         self.assertEqual(config.gpu.watchdog_curve.target_temp_c, 72.0)
+        self.assertEqual(config.gpu.watchdog_curve.over_target_kp, 8.0)
+        self.assertEqual(config.gpu.watchdog_curve.derivative_lookahead_seconds, 20.0)
+        self.assertEqual(config.gpu.watchdog_curve.derivative_smoothing_alpha, 0.35)
+        self.assertEqual(config.gpu.watchdog_curve.cooldown_release_below_target_c, 3.0)
+        self.assertEqual(config.gpu.watchdog_curve.cooldown_release_gpu_util_percent, 10.0)
         self.assertEqual(config.gpu.watchdog_curve.command_min_delta_xx, 5)
         self.assertEqual(config.gpu.watchdog_curve.emergency_temp_c, 84.0)
 
@@ -299,6 +304,8 @@ class TestConfigStore(unittest.TestCase):
         encoded = json.dumps(fields)
         self.assertIn("target_temp_c", encoded)
         self.assertIn("command_min_delta_xx", encoded)
+        self.assertIn("help", encoded)
+        self.assertIn("Above-target gain", encoded)
 
 
 if __name__ == "__main__":

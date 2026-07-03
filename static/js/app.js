@@ -39,6 +39,25 @@ let settingsData = null;
 let activeSettingsSection = "runtime";
 let settingsDirty = false;
 let settingsAdvanced = false;
+let gpuStatusChart = null;
+let gpuStatusWindow = "15m";
+let gpuStatusTimer = null;
+let gpuStatusVisibleSeries = {
+  gpu_temp_c: true,
+  gpu_util_percent: true,
+  gpu_mem_util_percent: true,
+  last_target_xx: true,
+  last_applied_xx: true,
+};
+
+const GPU_STATUS_WINDOWS = ["5m", "15m", "1h", "6h", "24h"];
+const GPU_STATUS_SERIES = {
+  gpu_temp_c: { label: "Temperature", color: "#c43c2b", axis: "temp", unit: " C" },
+  gpu_util_percent: { label: "GPU load", color: "#2f5d50", axis: "percent", unit: "%" },
+  gpu_mem_util_percent: { label: "Memory load", color: "#6d5bd0", axis: "percent", unit: "%" },
+  last_target_xx: { label: "Fan target", color: "#b37a16", axis: "fan", unit: " xx" },
+  last_applied_xx: { label: "Fan applied", color: "#1f6f9f", axis: "fan", unit: " xx" },
+};
 
 function getDefaultSubtab(tab) {
   const options = SUBTAB_OPTIONS[tab] || ["main"];
@@ -565,11 +584,14 @@ function updateWatchdogPanelFromData(wd, gpuFallback) {
   const poll = wd && wd.poll_seconds !== undefined ? `${wd.poll_seconds}s` : "--";
   const targetTemp = wd && wd.target_temp_c !== undefined ? `${wd.target_temp_c}\u00b0C` : "--";
   const smoothTemp = wd && typeof wd.smoothed_temp_c === "number" ? `${wd.smoothed_temp_c.toFixed(1)}\u00b0C` : "--";
+  const projectedTemp = wd && typeof wd.projected_temp_c === "number" ? `${wd.projected_temp_c.toFixed(1)}\u00b0C` : "--";
+  const tempRate = wd && typeof wd.temp_rate_c_per_s === "number" ? `${wd.temp_rate_c_per_s.toFixed(2)}\u00b0C/s` : "--";
   const desiredFan = wd && wd.desired_fan_xx !== null && wd.desired_fan_xx !== undefined ? String(wd.desired_fan_xx) : "--";
   const limitedFan = wd && wd.rate_limited_target_xx !== null && wd.rate_limited_target_xx !== undefined ? String(wd.rate_limited_target_xx) : "--";
+  const kp = wd && wd.over_target_kp !== undefined ? `${wd.kp || "--"}/${wd.over_target_kp}` : "--";
   const minChange = wd && wd.min_change_interval_seconds !== undefined ? `${wd.min_change_interval_seconds}s` : "--";
   const minDelta = wd && wd.command_min_delta_xx !== undefined ? String(wd.command_min_delta_xx) : "--";
-  setText("wd-settings-summary", `PI: poll ${poll}, target ${targetTemp}, smooth ${smoothTemp}, desired/limited ${desiredFan}/${limitedFan}, command ${minChange}/delta ${minDelta}`);
+  setText("wd-settings-summary", `PID: poll ${poll}, target ${targetTemp}, smooth/projected ${smoothTemp}/${projectedTemp}, rise ${tempRate}, gain ${kp}, desired/limited ${desiredFan}/${limitedFan}, command ${minChange}/delta ${minDelta}`);
 }
 
 async function refreshWatchdogPanel() {
@@ -1055,6 +1077,239 @@ function formatSettingValue(field) {
   return String(field.value);
 }
 
+function appendSettingLabelContent(node, field) {
+  const text = document.createElement("span");
+  text.textContent = field.label || field.key;
+  node.appendChild(text);
+
+  if (!field.help) return;
+  const help = document.createElement("span");
+  help.className = "settings-help";
+  help.tabIndex = 0;
+  help.setAttribute("role", "button");
+  help.setAttribute("aria-label", `${field.label || field.key}: ${field.help}`);
+  help.dataset.tooltip = field.help;
+  help.textContent = "?";
+  node.appendChild(help);
+}
+
+function setGpuStatusStatus(message, isError = false) {
+  const node = qs("#gpu-status-message");
+  if (!node) return;
+  node.textContent = message;
+  node.classList.toggle("status-error", !!isError);
+  node.classList.toggle("status-ok-text", !isError);
+}
+
+function formatGpuStatusTime(value) {
+  if (!value) return "--";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function formatGpuStatusValue(value, unit = "") {
+  if (value === null || value === undefined || value === "") return "--";
+  if (typeof value === "number") return `${Number.isInteger(value) ? value : value.toFixed(1)}${unit}`;
+  return `${value}${unit}`;
+}
+
+function buildGpuStatusSection() {
+  const grid = qs("#settings-field-grid");
+  if (!grid) return;
+  if (gpuStatusChart) {
+    gpuStatusChart.destroy();
+    gpuStatusChart = null;
+  }
+  grid.innerHTML = "";
+  grid.classList.add("gpu-status-grid");
+
+  const panel = document.createElement("div");
+  panel.className = "gpu-status-panel";
+
+  const strip = document.createElement("div");
+  strip.className = "gpu-status-strip";
+  [
+    ["Mode", "gpu-status-mode"],
+    ["Temp", "gpu-status-temp"],
+    ["GPU load", "gpu-status-util"],
+    ["Memory", "gpu-status-mem"],
+    ["Target fan", "gpu-status-target"],
+    ["Applied fan", "gpu-status-applied"],
+  ].forEach(([label, id]) => {
+    const item = document.createElement("div");
+    item.className = "gpu-status-stat";
+    const name = document.createElement("span");
+    name.textContent = label;
+    const value = document.createElement("strong");
+    value.id = id;
+    value.textContent = "--";
+    item.append(name, value);
+    strip.appendChild(item);
+  });
+
+  const toolbar = document.createElement("div");
+  toolbar.className = "gpu-status-toolbar";
+  const toolbarLeft = document.createElement("div");
+  toolbarLeft.className = "gpu-status-toolbar-left";
+  const toolbarRight = document.createElement("div");
+  toolbarRight.className = "gpu-status-toolbar-right";
+
+  const windowGroup = document.createElement("div");
+  windowGroup.className = "gpu-status-segmented";
+  GPU_STATUS_WINDOWS.forEach((windowId) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.dataset.gpuWindow = windowId;
+    btn.textContent = windowId;
+    btn.classList.toggle("active", windowId === gpuStatusWindow);
+    btn.addEventListener("click", () => {
+      gpuStatusWindow = windowId;
+      qsa("[data-gpu-window]").forEach((node) => node.classList.toggle("active", node.dataset.gpuWindow === gpuStatusWindow));
+      refreshGpuStatusChart();
+    });
+    windowGroup.appendChild(btn);
+  });
+
+  const refreshBtn = document.createElement("button");
+  refreshBtn.type = "button";
+  refreshBtn.className = "secondary";
+  refreshBtn.textContent = "Refresh";
+  refreshBtn.addEventListener("click", refreshGpuStatusChart);
+  toolbarLeft.appendChild(windowGroup);
+  toolbarRight.appendChild(refreshBtn);
+  toolbar.append(toolbarLeft, toolbarRight);
+
+  const toggles = document.createElement("div");
+  toggles.className = "gpu-status-toggles";
+  Object.entries(GPU_STATUS_SERIES).forEach(([key, meta]) => {
+    const label = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = !!gpuStatusVisibleSeries[key];
+    input.addEventListener("change", () => {
+      gpuStatusVisibleSeries[key] = input.checked;
+      refreshGpuStatusChart(false);
+    });
+    label.append(input, document.createTextNode(meta.label));
+    toggles.appendChild(label);
+  });
+
+  const chartWrap = document.createElement("div");
+  chartWrap.className = "gpu-status-chart-wrap";
+  const canvas = document.createElement("canvas");
+  canvas.id = "gpu-status-chart";
+  canvas.style.width = "100%";
+  canvas.style.height = "100%";
+  chartWrap.appendChild(canvas);
+
+  const message = document.createElement("p");
+  message.className = "settings-save-status muted";
+  message.id = "gpu-status-message";
+  message.textContent = "Loading GPU status...";
+
+  const controls = document.createElement("div");
+  controls.className = "gpu-status-controls";
+  controls.append(toolbar, toggles);
+
+  panel.append(controls, strip, chartWrap, message);
+  grid.appendChild(panel);
+}
+
+function updateGpuStatusStrip(wd, latestPoint) {
+  const source = wd || latestPoint || {};
+  setText("gpu-status-mode", source.mode || source.watchdog_mode || "--");
+  setText("gpu-status-temp", formatGpuStatusValue(source.gpu_temp_c, " C"));
+  setText("gpu-status-util", formatGpuStatusValue(source.gpu_util_percent, "%"));
+  setText("gpu-status-mem", formatGpuStatusValue(source.gpu_mem_util_percent, "%"));
+  setText("gpu-status-target", formatGpuStatusValue(source.last_target_xx, " xx"));
+  setText("gpu-status-applied", formatGpuStatusValue(source.last_applied_xx, " xx"));
+}
+
+function renderGpuStatusChart(history) {
+  const canvas = qs("#gpu-status-chart");
+  if (!canvas || !window.Chart) return;
+
+  const points = history && Array.isArray(history.points) ? history.points : [];
+  const labels = points.map((point) => formatGpuStatusTime(point.ts));
+  const datasets = Object.entries(GPU_STATUS_SERIES)
+    .filter(([key]) => gpuStatusVisibleSeries[key])
+    .map(([key, meta]) => ({
+      label: meta.label,
+      data: points.map((point) => point[key] === null || point[key] === undefined ? null : point[key]),
+      borderColor: meta.color,
+      backgroundColor: meta.color,
+      yAxisID: meta.axis,
+      tension: 0.25,
+      spanGaps: false,
+      pointRadius: 0,
+      borderWidth: 2,
+    }));
+
+  const config = {
+    type: "line",
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { position: "bottom" },
+        tooltip: { callbacks: { title: (items) => items && items[0] ? items[0].label : "" } },
+      },
+      scales: {
+        x: { ticks: { maxTicksLimit: 8 } },
+        temp: { type: "linear", position: "left", title: { display: true, text: "C" } },
+        percent: { type: "linear", position: "right", min: 0, max: 100, grid: { drawOnChartArea: false }, title: { display: true, text: "%" } },
+        fan: { type: "linear", position: "right", min: 0, max: 255, display: true, grid: { drawOnChartArea: false }, title: { display: true, text: "fan xx" } },
+      },
+    },
+  };
+
+  if (gpuStatusChart) {
+    gpuStatusChart.data = config.data;
+    gpuStatusChart.options = config.options;
+    gpuStatusChart.update();
+    return;
+  }
+  gpuStatusChart = new Chart(canvas, config);
+}
+
+async function refreshGpuStatusChart(showLoading = true) {
+  if (activeTab !== "settings" || activeSettingsSection !== "gpu_status") return;
+  if (showLoading) setGpuStatusStatus("Loading GPU status...");
+
+  try {
+    const [historyResult, watchdogResult] = await Promise.allSettled([
+      getJson(`/api/gpu_status/history?window=${encodeURIComponent(gpuStatusWindow)}`),
+      getJson("/api/gpu_watchdog/status"),
+    ]);
+    if (historyResult.status !== "fulfilled") throw historyResult.reason;
+
+    const history = historyResult.value;
+    const wd = watchdogResult.status === "fulfilled" ? watchdogResult.value : null;
+    const latestPoint = history.points && history.points.length ? history.points[history.points.length - 1] : null;
+    updateGpuStatusStrip(wd, latestPoint);
+    renderGpuStatusChart(history);
+    const count = history.points ? history.points.length : 0;
+    setGpuStatusStatus(`Loaded ${count} points for ${history.window}. Last refresh ${new Date().toLocaleTimeString()}.`);
+  } catch (err) {
+    setGpuStatusStatus(`GPU status load failed: ${err}`, true);
+  }
+}
+
+function syncGpuStatusAutoRefresh() {
+  const shouldRun = activeTab === "settings" && activeSettingsSection === "gpu_status";
+  if (shouldRun && !gpuStatusTimer) {
+    refreshGpuStatusChart();
+    gpuStatusTimer = window.setInterval(() => refreshGpuStatusChart(false), 10000);
+  } else if (!shouldRun && gpuStatusTimer) {
+    window.clearInterval(gpuStatusTimer);
+    gpuStatusTimer = null;
+  }
+}
+
 function renderSettingsSection(sectionId) {
   const sections = settingsData && settingsData.sections ? settingsData.sections : {};
   if (!settingsAdvanced && sections[sectionId] && sections[sectionId].advanced) {
@@ -1075,8 +1330,21 @@ function renderSettingsSection(sectionId) {
     btn.classList.toggle("active", btn.dataset.settingsSection === sectionId);
   });
 
+  if (section.custom === "gpu_status") {
+    buildGpuStatusSection();
+    const table = qs("#settings-effective-table");
+    if (table) table.innerHTML = "";
+    const effectiveWrap = qs("#settings-effective-wrap");
+    if (effectiveWrap) effectiveWrap.classList.add("hidden");
+    setSettingsSaveStatus("Read-only live status.");
+    updateSettingsSaveButton(section);
+    syncGpuStatusAutoRefresh();
+    return;
+  }
+
   const grid = qs("#settings-field-grid");
   if (grid) {
+    grid.classList.remove("gpu-status-grid");
     grid.innerHTML = "";
     if (section.error) {
       const card = document.createElement("div");
@@ -1096,7 +1364,7 @@ function renderSettingsSection(sectionId) {
         card.classList.add("inline-setting");
         const text = document.createElement("span");
         const label = document.createElement("b");
-        label.textContent = field.label || field.key;
+        appendSettingLabelContent(label, field);
         const source = document.createElement("small");
         source.textContent = field.source || "";
         text.append(label, source);
@@ -1110,7 +1378,7 @@ function renderSettingsSection(sectionId) {
         card.append(text, input);
       } else {
         const label = document.createElement("label");
-        label.textContent = field.label || field.key;
+        appendSettingLabelContent(label, field);
         const source = document.createElement("small");
         source.textContent = field.source || "";
         if (editable) {
@@ -1149,6 +1417,7 @@ function renderSettingsSection(sectionId) {
       table.appendChild(row);
     });
   }
+  syncGpuStatusAutoRefresh();
 }
 
 function syncSettingsAdvancedVisibility() {
@@ -1310,6 +1579,7 @@ function syncTabPolling() {
   if (activeTab === "settings" && !settingsData) {
     loadSettings(activeSettingsSection);
   }
+  syncGpuStatusAutoRefresh();
 }
 
 // Modal helpers

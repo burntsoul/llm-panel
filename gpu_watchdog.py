@@ -20,7 +20,7 @@ MODE_AUTO = "auto"
 MODE_VM_OFF_IDLE = "vm_off_idle"
 MODE_FAILSAFE = "failsafe"
 
-CONTROLLER_PI = "pi"
+CONTROLLER_PI = "pid_predictive"
 
 
 def _utc_now_iso() -> str:
@@ -79,11 +79,13 @@ class GPUWatchdogService:
         fan_setter: Callable[[int], Dict[str, Any]] = set_ilo_fan_min,
         vm_state_getter: Optional[Callable[[], str]] = None,
         monotonic_fn: Callable[[], float] = time.monotonic,
+        sample_recorder: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> None:
         self._telemetry_getter = telemetry_getter
         self._fan_setter = fan_setter
         self._vm_state_getter = vm_state_getter or (lambda: get_vm_status(settings.LLM_VM_ID))
         self._monotonic = monotonic_fn
+        self._sample_recorder = sample_recorder
         self._task: Optional[asyncio.Task] = None
 
         self._vm_off_idle_enabled = bool(settings.GPU_WATCHDOG_VM_OFF_IDLE_ENABLED)
@@ -116,6 +118,12 @@ class GPUWatchdogService:
         self._smoothed_temp_c: Optional[float] = None
         self._pi_error_c: Optional[float] = None
         self._pi_integral = 0.0
+        self._temp_rate_c_per_s: Optional[float] = None
+        self._projected_temp_c: Optional[float] = None
+        self._projected_error_c: Optional[float] = None
+        self._control_error_c: Optional[float] = None
+        self._cooldown_release_active = False
+        self._last_temp_sample_monotonic: Optional[float] = None
         self._desired_fan_xx: Optional[int] = None
         self._rate_limited_target_xx: Optional[int] = None
 
@@ -130,9 +138,14 @@ class GPUWatchdogService:
         self._min_fan_xx = int(settings.GPU_WATCHDOG_MIN_FAN_XX)
         self._max_fan_xx = int(settings.GPU_WATCHDOG_MAX_FAN_XX)
         self._kp = float(settings.GPU_WATCHDOG_PI_KP)
+        self._over_target_kp = float(settings.GPU_WATCHDOG_OVER_TARGET_KP)
         self._ki = float(settings.GPU_WATCHDOG_PI_KI)
         self._integral_clamp = float(settings.GPU_WATCHDOG_PI_INTEGRAL_CLAMP)
         self._smoothing_alpha = float(settings.GPU_WATCHDOG_SMOOTHING_ALPHA)
+        self._derivative_lookahead_seconds = float(settings.GPU_WATCHDOG_DERIVATIVE_LOOKAHEAD_SECONDS)
+        self._derivative_smoothing_alpha = float(settings.GPU_WATCHDOG_DERIVATIVE_SMOOTHING_ALPHA)
+        self._cooldown_release_below_target_c = float(settings.GPU_WATCHDOG_COOLDOWN_RELEASE_BELOW_TARGET_C)
+        self._cooldown_release_gpu_util_percent = float(settings.GPU_WATCHDOG_COOLDOWN_RELEASE_GPU_UTIL_PERCENT)
         self._min_change_interval_seconds = float(settings.WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS)
         self._command_min_delta_xx = int(settings.GPU_WATCHDOG_COMMAND_MIN_DELTA_XX)
         self._max_step_up_xx = int(settings.GPU_WATCHDOG_MAX_STEP_UP_XX)
@@ -152,6 +165,12 @@ class GPUWatchdogService:
             self._smoothed_temp_c = None
             self._pi_error_c = None
             self._pi_integral = 0.0
+            self._temp_rate_c_per_s = None
+            self._projected_temp_c = None
+            self._projected_error_c = None
+            self._control_error_c = None
+            self._cooldown_release_active = False
+            self._last_temp_sample_monotonic = None
             self._desired_fan_xx = None
             self._rate_limited_target_xx = None
         self._status_updated_at = _utc_now_iso()
@@ -188,10 +207,23 @@ class GPUWatchdogService:
             "smoothed_temp_c": self._smoothed_temp_c,
             "pi_error_c": self._pi_error_c,
             "pi_integral": self._pi_integral,
+            "temp_rate_c_per_s": self._temp_rate_c_per_s,
+            "projected_temp_c": self._projected_temp_c,
+            "projected_error_c": self._projected_error_c,
+            "control_error_c": self._control_error_c,
+            "cooldown_release_active": self._cooldown_release_active,
+            "cooldown_release_below_target_c": self._cooldown_release_below_target_c,
+            "cooldown_release_gpu_util_percent": self._cooldown_release_gpu_util_percent,
+            "derivative_lookahead_seconds": self._derivative_lookahead_seconds,
+            "derivative_smoothing_alpha": self._derivative_smoothing_alpha,
+            "over_target_kp": self._over_target_kp,
             "desired_fan_xx": self._desired_fan_xx,
             "rate_limited_target_xx": self._rate_limited_target_xx,
             "min_fan_xx": self._min_fan_xx,
             "max_fan_xx": self._max_fan_xx,
+            "kp": self._kp,
+            "ki": self._ki,
+            "integral_clamp": self._integral_clamp,
             "min_change_interval_seconds": self._min_change_interval_seconds,
             "command_min_delta_xx": self._command_min_delta_xx,
             "max_step_up_xx": self._max_step_up_xx,
@@ -216,6 +248,14 @@ class GPUWatchdogService:
     def reset_error(self) -> None:
         self._last_error = None
         self._status_updated_at = _utc_now_iso()
+
+    def _record_history_sample(self) -> None:
+        if self._sample_recorder is None:
+            return
+        try:
+            self._sample_recorder(self.get_status())
+        except Exception as exc:
+            logger.warning("GPU history sample recording failed: %s", exc)
 
     async def start(self) -> None:
         if self._task and not self._task.done():
@@ -269,31 +309,83 @@ class GPUWatchdogService:
         if self._last_applied_xx is None:
             return desired_xx
         if desired_xx > self._last_applied_xx:
-            return min(desired_xx, self._last_applied_xx + self._max_step_up_xx)
+            step_xx = max(self._max_step_up_xx, self._command_min_delta_xx)
+            return min(desired_xx, self._last_applied_xx + step_xx)
         if desired_xx < self._last_applied_xx:
-            return max(desired_xx, self._last_applied_xx - self._max_step_down_xx)
+            step_xx = max(self._max_step_down_xx, self._command_min_delta_xx)
+            return max(desired_xx, self._last_applied_xx - step_xx)
         return desired_xx
 
     def _pi_target_for_temp(self, raw_temp_c: float) -> tuple[int, bool]:
         emergency = raw_temp_c >= self._emergency_temp_c
         if emergency:
             self._pi_error_c = raw_temp_c - self._target_temp_c
+            self._projected_temp_c = raw_temp_c
+            self._projected_error_c = self._pi_error_c
+            self._control_error_c = max(self._pi_error_c, 0.0)
+            self._cooldown_release_active = False
             self._desired_fan_xx = int(_clamp(self._emergency_fan_xx, self._min_fan_xx, self._max_fan_xx))
             self._rate_limited_target_xx = self._desired_fan_xx
             return self._desired_fan_xx, True
 
         alpha = _clamp(self._smoothing_alpha, 0.0, 1.0)
+        previous_smoothed_temp = self._smoothed_temp_c
         if self._smoothed_temp_c is None:
             self._smoothed_temp_c = raw_temp_c
         else:
             self._smoothed_temp_c = (alpha * raw_temp_c) + ((1.0 - alpha) * self._smoothed_temp_c)
+
+        now = self._monotonic()
+        if previous_smoothed_temp is not None and self._last_temp_sample_monotonic is not None:
+            elapsed = now - self._last_temp_sample_monotonic
+            if elapsed < 0.5:
+                elapsed = 0.0
+        else:
+            elapsed = 0.0
+
+        if previous_smoothed_temp is not None and elapsed > 0.0:
+            observed_rate = (self._smoothed_temp_c - previous_smoothed_temp) / elapsed
+            if observed_rate <= 0.0:
+                self._temp_rate_c_per_s = 0.0
+            else:
+                rate_alpha = _clamp(self._derivative_smoothing_alpha, 0.0, 1.0)
+                if self._temp_rate_c_per_s is None:
+                    self._temp_rate_c_per_s = observed_rate
+                else:
+                    self._temp_rate_c_per_s = (rate_alpha * observed_rate) + ((1.0 - rate_alpha) * self._temp_rate_c_per_s)
+        self._last_temp_sample_monotonic = now
 
         error = self._smoothed_temp_c - self._target_temp_c
         self._pi_error_c = error
         integral_delta = error * self._poll_seconds
         self._pi_integral = _clamp(self._pi_integral + integral_delta, 0.0, self._integral_clamp)
 
-        desired = self._min_fan_xx + (self._kp * max(error, 0.0)) + (self._ki * self._pi_integral)
+        gpu_util_percent = self._gpu_util_percent
+        low_gpu_load = not isinstance(gpu_util_percent, (int, float)) or gpu_util_percent <= self._cooldown_release_gpu_util_percent
+        raw_below_release = raw_temp_c <= (self._target_temp_c - self._cooldown_release_below_target_c)
+        self._cooldown_release_active = bool(raw_below_release and low_gpu_load)
+        if self._cooldown_release_active:
+            self._temp_rate_c_per_s = 0.0
+            self._projected_temp_c = self._smoothed_temp_c
+            self._projected_error_c = self._projected_temp_c - self._target_temp_c
+            self._control_error_c = 0.0
+            self._pi_integral = 0.0
+            self._desired_fan_xx = self._min_fan_xx
+            self._rate_limited_target_xx = self._rate_limit_target(self._desired_fan_xx)
+            return self._rate_limited_target_xx, False
+
+        positive_rate = max(self._temp_rate_c_per_s or 0.0, 0.0)
+        self._projected_temp_c = self._smoothed_temp_c + (positive_rate * self._derivative_lookahead_seconds)
+        self._projected_error_c = self._projected_temp_c - self._target_temp_c
+        self._control_error_c = max(error, self._projected_error_c, 0.0)
+
+        over_target_error = max(error, 0.0)
+        desired = (
+            self._min_fan_xx
+            + (self._kp * self._control_error_c)
+            + (self._over_target_kp * over_target_error)
+            + (self._ki * self._pi_integral)
+        )
         self._desired_fan_xx = int(round(_clamp(desired, self._min_fan_xx, self._max_fan_xx)))
         self._rate_limited_target_xx = self._rate_limit_target(self._desired_fan_xx)
         return self._rate_limited_target_xx, False
@@ -326,98 +418,107 @@ class GPUWatchdogService:
         logger.warning("GPU watchdog fan command failed: %s", err)
 
     async def step_once(self) -> None:
-        self._status_updated_at = _utc_now_iso()
+        try:
+            self._status_updated_at = _utc_now_iso()
 
-        if self._config_error:
-            self._mode = MODE_DISABLED
-            self._mode_reason = "config_error"
-            self._telemetry_applicable = False
-            self._last_error = self._config_error
-            return
+            if self._config_error:
+                self._mode = MODE_DISABLED
+                self._mode_reason = "config_error"
+                self._telemetry_applicable = False
+                self._last_error = self._config_error
+                return
 
-        if not self._enabled:
-            self._mode = MODE_DISABLED
-            self._mode_reason = "watchdog_disabled"
-            self._telemetry_applicable = False
-            self._last_error = None
-            return
+            if not self._enabled:
+                self._mode = MODE_DISABLED
+                self._mode_reason = "watchdog_disabled"
+                self._telemetry_applicable = False
+                self._last_error = None
+                return
 
-        vm_state = self._read_vm_state()
-        vm_running = self._is_vm_running(vm_state)
-        vm_known_not_running = self._is_vm_known_not_running(vm_state)
+            vm_state = self._read_vm_state()
+            vm_running = self._is_vm_running(vm_state)
+            vm_known_not_running = self._is_vm_known_not_running(vm_state)
 
-        if self._vm_off_idle_enabled and vm_known_not_running:
-            self._mode = MODE_VM_OFF_IDLE
-            self._mode_reason = f"vm_{str(vm_state).strip().lower()}"
-            self._telemetry_applicable = False
-            self._telemetry_ok = False
-            self._gpu_name = None
-            self._gpu_id = None
-            self._gpu_temp_c = None
-            self._gpu_util_percent = None
-            self._gpu_mem_util_percent = None
-            self._last_error = None
-            self._smoothed_temp_c = None
-            self._pi_error_c = None
-            self._pi_integral = 0.0
-            await self._apply_target_if_needed(self._vm_off_fan_min_xx)
+            if self._vm_off_idle_enabled and vm_known_not_running:
+                self._mode = MODE_VM_OFF_IDLE
+                self._mode_reason = f"vm_{str(vm_state).strip().lower()}"
+                self._telemetry_applicable = False
+                self._telemetry_ok = False
+                self._gpu_name = None
+                self._gpu_id = None
+                self._gpu_temp_c = None
+                self._gpu_util_percent = None
+                self._gpu_mem_util_percent = None
+                self._last_error = None
+                self._smoothed_temp_c = None
+                self._pi_error_c = None
+                self._pi_integral = 0.0
+                self._temp_rate_c_per_s = None
+                self._projected_temp_c = None
+                self._projected_error_c = None
+                self._control_error_c = None
+                self._cooldown_release_active = False
+                self._last_temp_sample_monotonic = None
+                await self._apply_target_if_needed(self._vm_off_fan_min_xx)
+                if self._last_transition_mode != self._mode:
+                    logger.info("GPU watchdog mode transition: %s -> %s", self._last_transition_mode, self._mode)
+                    self._last_transition_mode = self._mode
+                return
+
+            self._telemetry_applicable = True
+            telemetry: Dict[str, Any]
+            try:
+                telemetry = await asyncio.to_thread(self._telemetry_getter)
+            except Exception as exc:
+                telemetry = {
+                    "telemetry_ok": False,
+                    "error": f"telemetry exception: {exc}",
+                    "source": "remote_glances",
+                    "updated_at": _utc_now_iso(),
+                }
+
+            self._telemetry_source = telemetry.get("source") or self._telemetry_source
+            self._telemetry_ok = bool(telemetry.get("telemetry_ok"))
+            self._gpu_name = telemetry.get("gpu_name")
+            self._gpu_id = telemetry.get("gpu_id")
+            self._gpu_temp_c = telemetry.get("gpu_temp_c")
+            self._gpu_util_percent = telemetry.get("gpu_util_percent")
+            self._gpu_mem_util_percent = telemetry.get("gpu_mem_util_percent")
+
+            stale = self._telemetry_is_stale(telemetry)
+            telemetry_error = telemetry.get("error")
+            healthy = self._telemetry_ok and self._gpu_temp_c is not None and not stale
+
+            if not healthy:
+                self._mode = MODE_FAILSAFE
+                self._mode_reason = "telemetry_invalid"
+                if stale:
+                    self._last_error = "telemetry stale"
+                    self._mode_reason = "telemetry_stale"
+                elif telemetry_error:
+                    self._last_error = f"telemetry error: {telemetry_error}"
+                    self._mode_reason = "telemetry_error"
+                else:
+                    self._last_error = "telemetry invalid"
+                if vm_running:
+                    self._mode_reason = f"{self._mode_reason}_vm_running"
+                elif vm_state is None:
+                    self._mode_reason = f"{self._mode_reason}_vm_unknown"
+                await self._apply_target_if_needed(self._failsafe_fan_min_xx)
+            else:
+                if self._mode == MODE_FAILSAFE:
+                    logger.info("GPU watchdog leaving failsafe mode (telemetry healthy)")
+                self._mode = MODE_AUTO
+                self._mode_reason = "pi_controller"
+                self._last_error = None
+                target, emergency = self._pi_target_for_temp(float(self._gpu_temp_c))
+                await self._apply_target_if_needed(target, force=emergency)
+
             if self._last_transition_mode != self._mode:
                 logger.info("GPU watchdog mode transition: %s -> %s", self._last_transition_mode, self._mode)
                 self._last_transition_mode = self._mode
-            return
-
-        self._telemetry_applicable = True
-        telemetry: Dict[str, Any]
-        try:
-            telemetry = await asyncio.to_thread(self._telemetry_getter)
-        except Exception as exc:
-            telemetry = {
-                "telemetry_ok": False,
-                "error": f"telemetry exception: {exc}",
-                "source": "remote_glances",
-                "updated_at": _utc_now_iso(),
-            }
-
-        self._telemetry_source = telemetry.get("source") or self._telemetry_source
-        self._telemetry_ok = bool(telemetry.get("telemetry_ok"))
-        self._gpu_name = telemetry.get("gpu_name")
-        self._gpu_id = telemetry.get("gpu_id")
-        self._gpu_temp_c = telemetry.get("gpu_temp_c")
-        self._gpu_util_percent = telemetry.get("gpu_util_percent")
-        self._gpu_mem_util_percent = telemetry.get("gpu_mem_util_percent")
-
-        stale = self._telemetry_is_stale(telemetry)
-        telemetry_error = telemetry.get("error")
-        healthy = self._telemetry_ok and self._gpu_temp_c is not None and not stale
-
-        if not healthy:
-            self._mode = MODE_FAILSAFE
-            self._mode_reason = "telemetry_invalid"
-            if stale:
-                self._last_error = "telemetry stale"
-                self._mode_reason = "telemetry_stale"
-            elif telemetry_error:
-                self._last_error = f"telemetry error: {telemetry_error}"
-                self._mode_reason = "telemetry_error"
-            else:
-                self._last_error = "telemetry invalid"
-            if vm_running:
-                self._mode_reason = f"{self._mode_reason}_vm_running"
-            elif vm_state is None:
-                self._mode_reason = f"{self._mode_reason}_vm_unknown"
-            await self._apply_target_if_needed(self._failsafe_fan_min_xx)
-        else:
-            if self._mode == MODE_FAILSAFE:
-                logger.info("GPU watchdog leaving failsafe mode (telemetry healthy)")
-            self._mode = MODE_AUTO
-            self._mode_reason = "pi_controller"
-            self._last_error = None
-            target, emergency = self._pi_target_for_temp(float(self._gpu_temp_c))
-            await self._apply_target_if_needed(target, force=emergency)
-
-        if self._last_transition_mode != self._mode:
-            logger.info("GPU watchdog mode transition: %s -> %s", self._last_transition_mode, self._mode)
-            self._last_transition_mode = self._mode
+        finally:
+            self._record_history_sample()
 
     async def run_loop(self) -> None:
         logger.info("GPU watchdog loop started")

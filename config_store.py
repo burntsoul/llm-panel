@@ -42,17 +42,22 @@ class GpuFanControlConfig(BaseModel):
 
 
 class GpuWatchdogCurveConfig(BaseModel):
-    poll_seconds: float = Field(default=5.0, gt=0.0)
+    poll_seconds: float = Field(default=3.0, gt=0.0)
     target_temp_c: float = 72.0
     min_fan_xx: int = Field(default=40, ge=0, le=255)
     max_fan_xx: int = Field(default=230, ge=0, le=255)
-    kp: float = Field(default=14.0, ge=0.0)
-    ki: float = Field(default=0.08, ge=0.0)
+    kp: float = Field(default=8.0, ge=0.0)
+    over_target_kp: float = Field(default=8.0, ge=0.0)
+    ki: float = Field(default=0.06, ge=0.0)
     integral_clamp: float = Field(default=800.0, ge=0.0)
-    smoothing_alpha: float = Field(default=0.25, ge=0.0, le=1.0)
-    command_min_interval_seconds: float = Field(default=20.0, ge=0.0)
+    smoothing_alpha: float = Field(default=0.45, ge=0.0, le=1.0)
+    derivative_lookahead_seconds: float = Field(default=20.0, ge=0.0)
+    derivative_smoothing_alpha: float = Field(default=0.35, ge=0.0, le=1.0)
+    cooldown_release_below_target_c: float = Field(default=3.0, ge=0.0)
+    cooldown_release_gpu_util_percent: float = Field(default=10.0, ge=0.0, le=100.0)
+    command_min_interval_seconds: float = Field(default=10.0, ge=0.0)
     command_min_delta_xx: int = Field(default=5, ge=0, le=255)
-    max_step_up_xx: int = Field(default=20, ge=1, le=255)
+    max_step_up_xx: int = Field(default=30, ge=1, le=255)
     max_step_down_xx: int = Field(default=10, ge=1, le=255)
     emergency_temp_c: float = 84.0
     emergency_fan_xx: int = Field(default=230, ge=0, le=255)
@@ -218,6 +223,7 @@ GPU_WATCHDOG_CURVE_FIELDS = {
         "label": "Poll interval",
         "type": "number",
         "unit": "s",
+        "help": "How often the watchdog reads GPU telemetry and recalculates the fan target. Lower values react faster but run SSH/telemetry logic more often.",
     },
     "target_temp_c": {
         "legacy_names": ("GPU_WATCHDOG_TARGET_TEMP_C", "WATCHDOG_TARGET_TEMP_C"),
@@ -226,6 +232,7 @@ GPU_WATCHDOG_CURVE_FIELDS = {
         "label": "Target temperature",
         "type": "number",
         "unit": "C",
+        "help": "Temperature the controller tries to hold. Prediction can start cooling before this value, and above-target gain adds extra fan pressure after it is crossed.",
     },
     "min_fan_xx": {
         "legacy_names": ("GPU_WATCHDOG_MIN_FAN_XX", "WATCHDOG_MIN_FAN_XX"),
@@ -233,6 +240,7 @@ GPU_WATCHDOG_CURVE_FIELDS = {
         "coerce": _coerce_int,
         "label": "Minimum fan",
         "type": "number",
+        "help": "Lowest fan minimum the automatic controller will request in normal mode. Higher values improve baseline cooling but increase idle noise.",
     },
     "max_fan_xx": {
         "legacy_names": ("GPU_WATCHDOG_MAX_FAN_XX", "WATCHDOG_MAX_FAN_XX"),
@@ -240,6 +248,7 @@ GPU_WATCHDOG_CURVE_FIELDS = {
         "coerce": _coerce_int,
         "label": "Maximum fan",
         "type": "number",
+        "help": "Highest fan minimum the automatic controller may request outside emergency handling. This caps normal controller output.",
     },
     "kp": {
         "legacy_names": ("GPU_WATCHDOG_PI_KP", "WATCHDOG_PI_KP"),
@@ -247,6 +256,15 @@ GPU_WATCHDOG_CURVE_FIELDS = {
         "coerce": _coerce_float,
         "label": "PI proportional gain",
         "type": "number",
+        "help": "Main predictive gain. Higher values make the fan target rise more for projected temperature error, including when heat is rising toward the target.",
+    },
+    "over_target_kp": {
+        "legacy_names": ("GPU_WATCHDOG_OVER_TARGET_KP", "WATCHDOG_OVER_TARGET_KP"),
+        "env_names": ("GPU_WATCHDOG_OVER_TARGET_KP", "WATCHDOG_OVER_TARGET_KP"),
+        "coerce": _coerce_float,
+        "label": "Above-target gain",
+        "type": "number",
+        "help": "Extra gain applied only when the smoothed temperature is already above target. Raise this if fans stay too flat while temperature climbs past target.",
     },
     "ki": {
         "legacy_names": ("GPU_WATCHDOG_PI_KI", "WATCHDOG_PI_KI"),
@@ -254,6 +272,7 @@ GPU_WATCHDOG_CURVE_FIELDS = {
         "coerce": _coerce_float,
         "label": "PI integral gain",
         "type": "number",
+        "help": "Slow accumulated correction for sustained heat. Higher values keep increasing fan target during long loads, but too high can overshoot and stay loud.",
     },
     "integral_clamp": {
         "legacy_names": ("GPU_WATCHDOG_PI_INTEGRAL_CLAMP", "WATCHDOG_PI_INTEGRAL_CLAMP"),
@@ -261,6 +280,7 @@ GPU_WATCHDOG_CURVE_FIELDS = {
         "coerce": _coerce_float,
         "label": "Integral clamp",
         "type": "number",
+        "help": "Maximum stored integral correction. Limits how much long-running heat can wind up the controller.",
     },
     "smoothing_alpha": {
         "legacy_names": ("GPU_WATCHDOG_SMOOTHING_ALPHA", "WATCHDOG_SMOOTHING_ALPHA"),
@@ -268,6 +288,42 @@ GPU_WATCHDOG_CURVE_FIELDS = {
         "coerce": _coerce_float,
         "label": "Smoothing alpha",
         "type": "number",
+        "help": "Temperature smoothing factor from 0 to 1. Higher values follow raw temperature faster; lower values ignore short spikes but react later.",
+    },
+    "derivative_lookahead_seconds": {
+        "legacy_names": ("GPU_WATCHDOG_DERIVATIVE_LOOKAHEAD_SECONDS", "WATCHDOG_DERIVATIVE_LOOKAHEAD_SECONDS"),
+        "env_names": ("GPU_WATCHDOG_DERIVATIVE_LOOKAHEAD_SECONDS", "WATCHDOG_DERIVATIVE_LOOKAHEAD_SECONDS"),
+        "coerce": _coerce_float,
+        "label": "Derivative lookahead",
+        "type": "number",
+        "unit": "s",
+        "help": "How far ahead the controller projects rising temperature. Higher values start cooling earlier, but too high can overreact to short bursts.",
+    },
+    "derivative_smoothing_alpha": {
+        "legacy_names": ("GPU_WATCHDOG_DERIVATIVE_SMOOTHING_ALPHA", "WATCHDOG_DERIVATIVE_SMOOTHING_ALPHA"),
+        "env_names": ("GPU_WATCHDOG_DERIVATIVE_SMOOTHING_ALPHA", "WATCHDOG_DERIVATIVE_SMOOTHING_ALPHA"),
+        "coerce": _coerce_float,
+        "label": "Derivative smoothing",
+        "type": "number",
+        "help": "Smoothing factor for the estimated temperature rise rate. Higher values react faster to rising heat; lower values reduce jitter.",
+    },
+    "cooldown_release_below_target_c": {
+        "legacy_names": ("GPU_WATCHDOG_COOLDOWN_RELEASE_BELOW_TARGET_C", "WATCHDOG_COOLDOWN_RELEASE_BELOW_TARGET_C"),
+        "env_names": ("GPU_WATCHDOG_COOLDOWN_RELEASE_BELOW_TARGET_C", "WATCHDOG_COOLDOWN_RELEASE_BELOW_TARGET_C"),
+        "coerce": _coerce_float,
+        "label": "Cooldown release margin",
+        "type": "number",
+        "unit": "C",
+        "help": "When raw temperature is this far below target and GPU load is low, stored controller pressure is cleared so fans can spin down.",
+    },
+    "cooldown_release_gpu_util_percent": {
+        "legacy_names": ("GPU_WATCHDOG_COOLDOWN_RELEASE_GPU_UTIL_PERCENT", "WATCHDOG_COOLDOWN_RELEASE_GPU_UTIL_PERCENT"),
+        "env_names": ("GPU_WATCHDOG_COOLDOWN_RELEASE_GPU_UTIL_PERCENT", "WATCHDOG_COOLDOWN_RELEASE_GPU_UTIL_PERCENT"),
+        "coerce": _coerce_float,
+        "label": "Cooldown release GPU load",
+        "type": "number",
+        "unit": "%",
+        "help": "GPU utilization must be at or below this value before cooldown release clears stored fan pressure.",
     },
     "command_min_interval_seconds": {
         "legacy_names": ("GPU_WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS", "WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS"),
@@ -276,6 +332,7 @@ GPU_WATCHDOG_CURVE_FIELDS = {
         "label": "Command interval",
         "type": "number",
         "unit": "s",
+        "help": "Minimum time between normal iLO fan commands. Lower values update fans faster; higher values reduce SSH traffic and fan command churn.",
     },
     "command_min_delta_xx": {
         "legacy_names": ("GPU_WATCHDOG_COMMAND_MIN_DELTA_XX", "WATCHDOG_COMMAND_MIN_DELTA_XX"),
@@ -283,6 +340,7 @@ GPU_WATCHDOG_CURVE_FIELDS = {
         "coerce": _coerce_int,
         "label": "Command delta",
         "type": "number",
+        "help": "Smallest fan target change that will be sent to iLO. Higher values suppress tiny changes; lower values track the calculated target more closely.",
     },
     "max_step_up_xx": {
         "legacy_names": ("GPU_WATCHDOG_MAX_STEP_UP_XX", "WATCHDOG_MAX_STEP_UP_XX"),
@@ -290,6 +348,7 @@ GPU_WATCHDOG_CURVE_FIELDS = {
         "coerce": _coerce_int,
         "label": "Max step up",
         "type": "number",
+        "help": "Largest normal fan increase per command. Higher values catch rising heat faster; lower values make fan ramps quieter.",
     },
     "max_step_down_xx": {
         "legacy_names": ("GPU_WATCHDOG_MAX_STEP_DOWN_XX", "WATCHDOG_MAX_STEP_DOWN_XX"),
@@ -297,6 +356,7 @@ GPU_WATCHDOG_CURVE_FIELDS = {
         "coerce": _coerce_int,
         "label": "Max step down",
         "type": "number",
+        "help": "Largest normal fan decrease per command. Lower values make cooldown quieter and prevent fast fan drops.",
     },
     "emergency_temp_c": {
         "legacy_names": ("GPU_WATCHDOG_EMERGENCY_TEMP_C", "WATCHDOG_EMERGENCY_TEMP_C"),
@@ -305,6 +365,7 @@ GPU_WATCHDOG_CURVE_FIELDS = {
         "label": "Emergency temperature",
         "type": "number",
         "unit": "C",
+        "help": "Raw GPU temperature that triggers immediate emergency fan target, bypassing smoothing and normal ramp limits.",
     },
     "emergency_fan_xx": {
         "legacy_names": ("GPU_WATCHDOG_EMERGENCY_FAN_XX", "WATCHDOG_EMERGENCY_FAN_XX"),
@@ -312,6 +373,7 @@ GPU_WATCHDOG_CURVE_FIELDS = {
         "coerce": _coerce_int,
         "label": "Emergency fan",
         "type": "number",
+        "help": "Fan minimum requested immediately when raw GPU temperature reaches emergency temperature.",
     },
     "failsafe_fan_xx": {
         "legacy_names": ("GPU_WATCHDOG_FAILSAFE_FAN_MIN_XX", "WATCHDOG_FAILSAFE_FAN_MIN_XX"),
@@ -319,6 +381,7 @@ GPU_WATCHDOG_CURVE_FIELDS = {
         "coerce": _coerce_int,
         "label": "Failsafe fan",
         "type": "number",
+        "help": "Fan minimum used when telemetry is missing, stale, or invalid while the VM is running or its state is unknown.",
     },
     "telemetry_stale_seconds": {
         "legacy_names": ("GPU_WATCHDOG_TELEMETRY_STALE_SECONDS", "WATCHDOG_TELEMETRY_STALE_SECONDS"),
@@ -327,6 +390,7 @@ GPU_WATCHDOG_CURVE_FIELDS = {
         "label": "Telemetry stale",
         "type": "number",
         "unit": "s",
+        "help": "Maximum accepted age of telemetry data. Older data is treated as stale and causes failsafe fan behavior.",
     },
 }
 
@@ -698,6 +762,8 @@ def gpu_watchdog_curve_fields_for_api(
         }
         if "unit" in meta:
             field["unit"] = meta["unit"]
+        if "help" in meta:
+            field["help"] = meta["help"]
         fields.append(field)
     return fields
 
