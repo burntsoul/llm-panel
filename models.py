@@ -12,6 +12,7 @@ import requests
 
 from config import settings
 from llm_server import llm_server_up
+import llama_cpp_provider
 
 logger = logging.getLogger(__name__)
 
@@ -400,6 +401,10 @@ def get_model_names() -> List[str]:
     for name, meta in _load_meta().items():
         if _profile_meta(meta)["enabled"] and name not in names:
             names.append(name)
+    for profile in llama_cpp_provider.list_profiles():
+        served = str(profile.get("served_model_id") or "").strip()
+        if served and served not in names:
+            names.append(served)
     return names
 
 
@@ -482,6 +487,29 @@ def get_model_display_entries() -> List[Dict[str, Any]]:
                 "source": source,
                 "device": device,
                 "profile": profile,
+            }
+        )
+
+    for profile in llama_cpp_provider.list_profiles():
+        served = str(profile.get("served_model_id") or "").strip()
+        if not served or served in seen:
+            continue
+        seen.add(served)
+        entries.append(
+            {
+                "id": served,
+                "label": f"{served} (llama.cpp GPU-local)",
+                "source": "local",
+                "device": "gpu",
+                "provider": "llama_cpp",
+                "profile": {
+                    "enabled": True,
+                    "provider": "llama_cpp",
+                    "profile_id": profile.get("id"),
+                    "gguf_path": profile.get("gguf_path"),
+                    "status": profile.get("status", "stopped"),
+                    "port": profile.get("port"),
+                },
             }
         )
 
@@ -577,6 +605,34 @@ def get_models_openai_format() -> List[Dict[str, Any]]:
             }
         )
 
+    seen_names = {item["id"] for item in result}
+    for profile in llama_cpp_provider.list_profiles():
+        served = str(profile.get("served_model_id") or "").strip()
+        if not served or served in seen_names:
+            continue
+        result.append(
+            {
+                "id": served,
+                "object": "model",
+                "created": base_ts + len(result),
+                "owned_by": "llama.cpp",
+                "metadata": {
+                    "source": "local",
+                    "device": "gpu",
+                    "provider": "llama_cpp",
+                    "profile": {
+                        "enabled": True,
+                        "provider": "llama_cpp",
+                        "profile_id": profile.get("id"),
+                        "gguf_path": profile.get("gguf_path"),
+                        "status": profile.get("status", "stopped"),
+                        "port": profile.get("port"),
+                    },
+                },
+                "description": f"{served} [llama.cpp GPU-local]",
+            }
+        )
+
     # Jos jostain syystä tyhjä, fallback DEFAULT_MODELS
     if not result:
         for idx, name in enumerate(settings.DEFAULT_MODELS):
@@ -655,6 +711,9 @@ def get_model_table_status() -> List[Dict[str, Any]]:
             "present_now": present,
             "base_present_now": base_present,
         }
+        if e.get("provider") == "llama_cpp":
+            row["present_now"] = e.get("profile", {}).get("status") == "running"
+            row["base_present_now"] = True
         rows.append(row)
 
     return rows

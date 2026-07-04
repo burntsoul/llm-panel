@@ -250,6 +250,15 @@ class Settings:
             f"http://{self.LLM_HOST}:{self.LLM_PORT}",
         )
 
+        # Shared SSH connection for services running on llm-server.
+        self.LLM_SERVER_SSH_ENABLED = _conf_bool("LLM_SERVER_SSH_ENABLED", False)
+        self.LLM_SERVER_SSH_HOST = _conf("LLM_SERVER_SSH_HOST", self.LLM_HOST)
+        self.LLM_SERVER_SSH_USER = _conf("LLM_SERVER_SSH_USER", "")
+        self.LLM_SERVER_SSH_PORT = _conf_int("LLM_SERVER_SSH_PORT", 22)
+        self.LLM_SERVER_SSH_KEY = _conf("LLM_SERVER_SSH_KEY", "")
+        self.LLM_SERVER_SSH_STRICT_HOST_KEY = _conf_bool("LLM_SERVER_SSH_STRICT_HOST_KEY", False)
+        self.LLM_SERVER_SSH_TIMEOUT = _conf_int("LLM_SERVER_SSH_TIMEOUT", 20)
+
         # -------- Embeddings --------
         # Oletus embedding-malli (jos ei ole määritelty)
         self.DEFAULT_EMBEDDING_MODEL = _env(

@@ -56,6 +56,7 @@ from models import (
     upsert_model_profile,
     profile_backing_model_name,
 )
+import llama_cpp_provider
 from lease_api import router as lease_api_router
 from comfyui_service import (
     generate_images as comfyui_generate_images,
@@ -1316,6 +1317,11 @@ def api_settings_effective():
                 "custom": "provider_ollama",
                 "fields": [],
             },
+            "provider_llama_cpp": {
+                "title": "llama.cpp provider",
+                "custom": "provider_llama_cpp",
+                "fields": [],
+            },
         },
     }
 
@@ -1817,6 +1823,246 @@ async def api_ollama_delete_profile(public_model: str):
     invalidate_model_cache()
     return _profile_response()
 
+
+def _llama_cpp_profile_payload() -> dict:
+    profiles = []
+    for profile in llama_cpp_provider.list_profiles():
+        try:
+            profiles.append(llama_cpp_provider.status_for_profile(profile))
+        except Exception:
+            profiles.append(profile)
+    return {
+        "provider": "llama_cpp",
+        "settings": llama_cpp_provider.get_provider_settings_safe(),
+        "profiles": profiles,
+    }
+
+
+@app.get("/api/providers/llama-cpp/settings")
+async def api_llama_cpp_settings():
+    return {
+        "provider": "llama_cpp",
+        "settings": llama_cpp_provider.get_provider_settings_safe(),
+    }
+
+
+@app.put("/api/providers/llama-cpp/settings")
+async def api_llama_cpp_update_settings(request: Request):
+    body = await request.json()
+    try:
+        updated = llama_cpp_provider.update_provider_settings(body if isinstance(body, dict) else {})
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail={"error": str(exc)})
+    return {"provider": "llama_cpp", "settings": updated}
+
+
+@app.post("/api/providers/llama-cpp/ssh/test")
+async def api_llama_cpp_ssh_test():
+    return llama_cpp_provider.test_ssh_connection()
+
+
+@app.post("/api/providers/llama-cpp/runtime/cleanup")
+async def api_llama_cpp_runtime_cleanup():
+    try:
+        result = await asyncio.get_running_loop().run_in_executor(
+            None,
+            llama_cpp_provider.cleanup_llama_cpp_runtime,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail={"error": str(exc)})
+    return {"provider": "llama_cpp", "cleanup": result}
+
+
+@app.post("/api/providers/llama-cpp/artifacts/scan")
+async def api_llama_cpp_scan_artifacts():
+    try:
+        artifacts = await asyncio.get_running_loop().run_in_executor(
+            None,
+            llama_cpp_provider.scan_artifacts,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail={"error": str(exc)})
+    return {"provider": "llama_cpp", "artifacts": artifacts}
+
+
+@app.delete("/api/providers/llama-cpp/artifacts")
+async def api_llama_cpp_delete_artifact(request: Request):
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail={"error": "JSON object required"})
+    try:
+        result = await asyncio.get_running_loop().run_in_executor(
+            None,
+            lambda: llama_cpp_provider.delete_artifact(str(body.get("path") or "")),
+        )
+        artifacts = await asyncio.get_running_loop().run_in_executor(
+            None,
+            llama_cpp_provider.scan_artifacts,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"error": str(exc)})
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail={"error": str(exc)})
+    return {"provider": "llama_cpp", "artifact": result, "artifacts": artifacts}
+
+
+@app.post("/api/providers/llama-cpp/downloads")
+async def api_llama_cpp_start_download(request: Request):
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail={"error": "JSON object required"})
+    try:
+        job = await asyncio.get_running_loop().run_in_executor(
+            None,
+            lambda: llama_cpp_provider.start_hf_download(
+                str(body.get("repo_id") or ""),
+                str(body.get("filename") or ""),
+            ),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"error": str(exc)})
+    except RuntimeError as exc:
+        message = str(exc)
+        status = 409 if "already active" in message else 502
+        raise HTTPException(status_code=status, detail={"error": message})
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail={"error": str(exc)})
+    return {"provider": "llama_cpp", "download": job}
+
+
+@app.get("/api/providers/llama-cpp/downloads/current")
+async def api_llama_cpp_current_download():
+    try:
+        job = await asyncio.get_running_loop().run_in_executor(None, llama_cpp_provider.get_download_job)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail={"error": str(exc)})
+    return {"provider": "llama_cpp", "download": job}
+
+
+@app.post("/api/providers/llama-cpp/downloads/current/cancel")
+async def api_llama_cpp_cancel_download():
+    try:
+        job = await asyncio.get_running_loop().run_in_executor(None, llama_cpp_provider.cancel_hf_download)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail={"error": str(exc)})
+    return {"provider": "llama_cpp", "download": job}
+
+
+@app.get("/api/providers/llama-cpp/downloads/current/logs")
+async def api_llama_cpp_download_logs():
+    try:
+        logs = await asyncio.get_running_loop().run_in_executor(None, llama_cpp_provider.get_download_logs)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail={"error": str(exc)})
+    return {"provider": "llama_cpp", "logs": logs}
+
+
+@app.get("/api/providers/llama-cpp/profiles")
+async def api_llama_cpp_profiles():
+    return _llama_cpp_profile_payload()
+
+
+def _check_llama_cpp_model_conflict(served_model_id: str, profile_id: str | None = None) -> None:
+    served_model_id = served_model_id.strip()
+    if not served_model_id:
+        return
+    existing_profile = llama_cpp_provider.find_profile_by_model(served_model_id)
+    if existing_profile and existing_profile.get("id") != profile_id:
+        raise HTTPException(status_code=409, detail={"error": f"served model id already exists: {served_model_id}"})
+    ollama_names = {row.get("id") for row in get_model_table_status() if row.get("provider") != "llama_cpp"}
+    if served_model_id in ollama_names:
+        raise HTTPException(status_code=409, detail={"error": f"model id conflicts with an existing Ollama model: {served_model_id}"})
+
+
+@app.post("/api/providers/llama-cpp/profiles")
+async def api_llama_cpp_create_profile(request: Request):
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail={"error": "JSON object required"})
+    _check_llama_cpp_model_conflict(str(body.get("served_model_id") or ""))
+    try:
+        profile = llama_cpp_provider.upsert_profile(body)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail={"error": str(exc)})
+    invalidate_model_cache()
+    return {**_llama_cpp_profile_payload(), "profile": profile}
+
+
+@app.put("/api/providers/llama-cpp/profiles/{profile_id}")
+async def api_llama_cpp_update_profile(profile_id: str, request: Request):
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail={"error": "JSON object required"})
+    _check_llama_cpp_model_conflict(str(body.get("served_model_id") or ""), profile_id=profile_id)
+    try:
+        profile = llama_cpp_provider.upsert_profile(body, profile_id=profile_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail={"error": str(exc)})
+    invalidate_model_cache()
+    return {**_llama_cpp_profile_payload(), "profile": profile}
+
+
+@app.delete("/api/providers/llama-cpp/profiles/{profile_id}")
+async def api_llama_cpp_delete_profile(profile_id: str):
+    existing = llama_cpp_provider.find_profile(profile_id)
+    if existing:
+        try:
+            llama_cpp_provider.stop_profile(profile_id)
+        except Exception:
+            pass
+    removed = llama_cpp_provider.delete_profile(profile_id)
+    invalidate_model_cache()
+    return {**_llama_cpp_profile_payload(), "removed": bool(removed)}
+
+
+@app.post("/api/providers/llama-cpp/profiles/{profile_id}/start")
+async def api_llama_cpp_start_profile(profile_id: str):
+    try:
+        profile = await asyncio.get_running_loop().run_in_executor(
+            None,
+            lambda: llama_cpp_provider.start_profile(profile_id),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail={"error": str(exc)})
+    return {**_llama_cpp_profile_payload(), "profile": profile}
+
+
+@app.post("/api/providers/llama-cpp/profiles/{profile_id}/stop")
+async def api_llama_cpp_stop_profile(profile_id: str):
+    try:
+        profile = await asyncio.get_running_loop().run_in_executor(
+            None,
+            lambda: llama_cpp_provider.stop_profile(profile_id),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail={"error": str(exc)})
+    return {**_llama_cpp_profile_payload(), "profile": profile}
+
+
+@app.post("/api/providers/llama-cpp/profiles/{profile_id}/restart")
+async def api_llama_cpp_restart_profile(profile_id: str):
+    try:
+        profile = await asyncio.get_running_loop().run_in_executor(
+            None,
+            lambda: llama_cpp_provider.restart_profile(profile_id),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail={"error": str(exc)})
+    return {**_llama_cpp_profile_payload(), "profile": profile}
+
+
+@app.get("/api/providers/llama-cpp/profiles/{profile_id}/logs")
+async def api_llama_cpp_profile_logs(profile_id: str):
+    try:
+        logs = await asyncio.get_running_loop().run_in_executor(
+            None,
+            lambda: llama_cpp_provider.get_profile_logs(profile_id),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail={"error": str(exc)})
+    return {"provider": "llama_cpp", "profile_id": profile_id, "logs": logs}
+
+
 @app.get("/models", response_class=HTMLResponse)
 def models_page():
     """
@@ -1948,6 +2194,40 @@ def _resolve_request_model(payload: dict) -> tuple[str | None, str | None]:
     return public_model, upstream_model
 
 
+async def _resolve_provider_for_payload(payload: dict) -> tuple[str | None, str | None, str, str]:
+    public_model = payload.get("model")
+    if isinstance(public_model, str) and public_model.strip():
+        public_model = public_model.strip()
+        profile = llama_cpp_provider.find_profile_by_model(public_model)
+        if profile:
+            payload["model"] = public_model
+            loop = asyncio.get_running_loop()
+            try:
+                status = await loop.run_in_executor(None, lambda: llama_cpp_provider.status_for_profile(profile))
+                if _should_start_llama_cpp_profile(status):
+                    await loop.run_in_executor(None, lambda: llama_cpp_provider.start_profile(str(profile["id"])))
+                refreshed = llama_cpp_provider.find_profile(str(profile["id"])) or profile
+                ready = await loop.run_in_executor(None, lambda: llama_cpp_provider.wait_until_ready(refreshed, timeout=5))
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail={"error": f"llama.cpp profile start failed: {exc}"},
+                )
+            if not ready:
+                raise HTTPException(
+                    status_code=503,
+                    detail={"error": "llama.cpp profile readiness timed out"},
+                )
+            return public_model, public_model, llama_cpp_provider.profile_base_url(refreshed), "llama_cpp"
+
+    public, upstream = _resolve_request_model(payload)
+    return public, upstream, settings.LLM_SERVER_BASE, "ollama"
+
+
+def _should_start_llama_cpp_profile(status: dict) -> bool:
+    return status.get("status") != "running"
+
+
 def _rewrite_upstream_json(payload: dict, public_model: str | None, upstream_model: str | None) -> dict:
     if not public_model or not upstream_model:
         return payload
@@ -2074,22 +2354,23 @@ async def chat_completions(request: Request):
     if stream:
         upstream_payload["stream"] = True
 
-    public_model, upstream_model = _resolve_request_model(upstream_payload)
+    public_model, upstream_model, upstream_base, upstream_provider = await _resolve_provider_for_payload(upstream_payload)
 
     # 1) Varmistetaan, että llm-server on hereillä
-    ready = await ensure_llm_running_and_ready()
-    if not ready:
-        return JSONResponse(
-            status_code=503,
-            content={
-                "error": {
-                    "message": "LLM server not available",
-                    "type": "server_error",
-                }
-            },
-        )
+    if upstream_provider == "ollama":
+        ready = await ensure_llm_running_and_ready()
+        if not ready:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": {
+                        "message": "LLM server not available",
+                        "type": "server_error",
+                    }
+                },
+            )
 
-    upstream_url = f"{settings.LLM_SERVER_BASE}/v1/chat/completions"
+    upstream_url = f"{upstream_base.rstrip('/')}/v1/chat/completions"
     headers = {"Content-Type": "application/json"}
     
     # Konvertoitu payload JSON-muotoon
@@ -2296,18 +2577,6 @@ async def completions(request: Request):
         contains_fim,
     )
 
-    ready = await ensure_llm_running_and_ready()
-    if not ready:
-        return JSONResponse(
-            status_code=503,
-            content={
-                "error": {
-                    "message": "LLM server not available",
-                    "type": "server_error",
-                }
-            },
-        )
-
     # Prefer proxying the true /v1/completions endpoint upstream (best for FIM/tab autocomplete).
     upstream_payload = dict(body)
     if temperature is not None:
@@ -2318,9 +2587,22 @@ async def completions(request: Request):
         upstream_payload["max_tokens"] = max(1, int(max_tokens))
     if stream:
         upstream_payload["stream"] = True
-    public_model, upstream_model = _resolve_request_model(upstream_payload)
+    public_model, upstream_model, upstream_base, upstream_provider = await _resolve_provider_for_payload(upstream_payload)
 
-    upstream_url = f"{settings.LLM_SERVER_BASE}/v1/completions"
+    if upstream_provider == "ollama":
+        ready = await ensure_llm_running_and_ready()
+        if not ready:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": {
+                        "message": "LLM server not available",
+                        "type": "server_error",
+                    }
+                },
+            )
+
+    upstream_url = f"{upstream_base.rstrip('/')}/v1/completions"
     headers = {"Content-Type": "application/json"}
     upstream_body = json.dumps(upstream_payload).encode("utf-8")
 
@@ -2341,7 +2623,7 @@ async def completions(request: Request):
             if upstream_model:
                 chat_payload["model"] = upstream_model
 
-            chat_url = f"{settings.LLM_SERVER_BASE}/v1/chat/completions"
+            chat_url = f"{upstream_base.rstrip('/')}/v1/chat/completions"
             chat_body = json.dumps(chat_payload).encode("utf-8")
 
             buffer = b""
@@ -2421,7 +2703,7 @@ async def completions(request: Request):
         if upstream_model:
             chat_payload["model"] = upstream_model
 
-        chat_url = f"{settings.LLM_SERVER_BASE}/v1/chat/completions"
+        chat_url = f"{upstream_base.rstrip('/')}/v1/chat/completions"
         chat_body = json.dumps(chat_payload).encode("utf-8")
 
         async with httpx.AsyncClient(timeout=None) as client:

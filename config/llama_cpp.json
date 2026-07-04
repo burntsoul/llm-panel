@@ -1,0 +1,66 @@
+{
+  "settings": {
+    "ssh_enabled": true,
+    "ssh_host": "192.168.8.33",
+    "ssh_user": "teemu",
+    "ssh_port": 22,
+    "ssh_key": "/var/lib/llm-agent/.ssh/llm_agent_llm_server",
+    "ssh_strict_host_key": false,
+    "ssh_timeout": 20,
+    "model_dir": "/models/llama",
+    "binary_path": "/usr/local/bin/llama-server",
+    "runtime_dir": "/tmp/llm-agent-llama",
+    "cache_dir": "/models/llama/.llm-agent-cache",
+    "default_host": "0.0.0.0",
+    "default_port": 8081,
+    "readiness_timeout": 180,
+    "hf_token": ""
+  },
+  "profiles": [
+    {
+      "id": "7079daadc716",
+      "served_model_id": "Qwen3.6-35B-A3B-UD-Q8_K_XL-llama256k",
+      "gguf_path": "/models/llama/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-UD-Q8_K_XL.gguf",
+      "port": 8081,
+      "status": "running",
+      "ctx_size": 262144,
+      "n_gpu_layers": 999,
+      "main_gpu": 0,
+      "tensor_split": "",
+      "split_mode": "",
+      "flash_attn": false,
+      "threads": 12,
+      "threads_batch": 12,
+      "batch_size": 4096,
+      "ubatch_size": 2048,
+      "parallel": 1,
+      "cont_batching": true,
+      "cache_enabled": true,
+      "cache_path": "/models/llama/.llm-agent-cache/Qwen3.6-35B-A3B-UD-Q8_K_XL-llama256k",
+      "cache_mode": "rw",
+      "extra_args": [
+        "-ot",
+        ".ffn_.*_exps.=CPU",
+        "--cache-type-k",
+        "f16",
+        "--cache-type-v",
+        "f16"
+      ],
+      "last_pid": "Warning: Permanently added '192.168.8.33' (ED25519) to the list of known hosts."
+    }
+  ],
+  "active_profile_id": "7079daadc716",
+  "download_job": {
+    "id": "0010da35d46d",
+    "repo_id": "unsloth/Qwen3.6-35B-A3B-GGUF",
+    "filename": "Qwen3.6-35B-A3B-UD-Q8_K_XL.gguf",
+    "target_dir": "/models/llama/Qwen3.6-35B-A3B-GGUF",
+    "target_path": "/models/llama/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-UD-Q8_K_XL.gguf",
+    "pid_path": "/tmp/llm-agent-llama/hf-download.pid",
+    "log_path": "/tmp/llm-agent-llama/hf-download.log",
+    "status": "completed",
+    "started_at": 1783113952.6301465,
+    "last_pid": "Warning: Permanently added '192.168.8.33' (ED25519) to the list of known hosts.",
+    "completed_at": 1783114636.3556077
+  }
+}

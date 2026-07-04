@@ -40,6 +40,11 @@ let activeSettingsSection = "runtime";
 let settingsDirty = false;
 let settingsAdvanced = false;
 let ollamaProfiles = [];
+let llamaCppSettings = null;
+let llamaCppProfiles = [];
+let llamaCppArtifacts = [];
+let llamaCppDownload = null;
+let llamaCppDownloadTimer = null;
 let gpuStatusChart = null;
 let gpuStatusWindow = "15m";
 let gpuStatusTimer = null;
@@ -1738,6 +1743,665 @@ async function removeOllamaModel(model) {
   }
 }
 
+function setLlamaCppStatus(message, isError = false) {
+  const node = qs("#llama-cpp-provider-status");
+  if (!node) return;
+  node.textContent = message || "";
+  node.classList.toggle("status-error", !!isError);
+}
+
+function llamaCppField(labelText, key, type = "text") {
+  const wrap = document.createElement("label");
+  wrap.className = "provider-field";
+  const label = document.createElement("span");
+  label.textContent = labelText;
+  const input = document.createElement("input");
+  input.type = type;
+  input.dataset.llamaSetting = key;
+  const value = llamaCppSettings && llamaCppSettings[key];
+  if (type === "checkbox") input.checked = !!value;
+  else input.value = value == null ? "" : String(value);
+  wrap.append(label, input);
+  return wrap;
+}
+
+function collectLlamaCppSettings() {
+  const payload = {};
+  qsa("[data-llama-setting]").forEach((input) => {
+    const key = input.dataset.llamaSetting;
+    payload[key] = input.type === "checkbox" ? input.checked : input.value;
+  });
+  return payload;
+}
+
+function syncLlamaCppSettingsFields() {
+  qsa("[data-llama-setting]").forEach((input) => {
+    const key = input.dataset.llamaSetting;
+    const value = llamaCppSettings && llamaCppSettings[key];
+    if (input.type === "checkbox") input.checked = !!value;
+    else if (document.activeElement !== input) input.value = value == null ? "" : String(value);
+  });
+}
+
+async function refreshLlamaCppProvider() {
+  try {
+    const data = await getJson("/api/providers/llama-cpp/profiles");
+    llamaCppSettings = data.settings || {};
+    llamaCppProfiles = data.profiles || [];
+    syncLlamaCppSettingsFields();
+    renderLlamaCppProfiles();
+    await refreshLlamaCppDownload(false);
+    setLlamaCppStatus(`Loaded ${llamaCppProfiles.length} profiles.`);
+  } catch (err) {
+    setLlamaCppStatus(`Load failed: ${err}`, true);
+  }
+}
+
+async function saveLlamaCppSettings() {
+  setLlamaCppStatus("Saving llama.cpp settings...");
+  try {
+    const data = await getJson("/api/providers/llama-cpp/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(collectLlamaCppSettings()),
+    });
+    llamaCppSettings = data.settings || {};
+    setLlamaCppStatus("Settings saved.");
+  } catch (err) {
+    setLlamaCppStatus(`Save failed: ${err}`, true);
+  }
+}
+
+async function testLlamaCppSsh() {
+  setLlamaCppStatus("Testing SSH...");
+  try {
+    const data = await getJson("/api/providers/llama-cpp/ssh/test", { method: "POST" });
+    setLlamaCppStatus(data.ok ? "SSH OK." : `SSH failed: ${data.message}`, !data.ok);
+  } catch (err) {
+    setLlamaCppStatus(`SSH test failed: ${err}`, true);
+  }
+}
+
+async function cleanupLlamaCppRuntime() {
+  if (!window.confirm("Stop stale managed llama.cpp server processes?")) return;
+  setLlamaCppStatus("Cleaning up llama.cpp runtime...");
+  try {
+    await getJson("/api/providers/llama-cpp/runtime/cleanup", { method: "POST" });
+    await refreshLlamaCppProvider();
+    setLlamaCppStatus("Runtime cleanup complete.");
+  } catch (err) {
+    setLlamaCppStatus(`Runtime cleanup failed: ${err}`, true);
+  }
+}
+
+function formatBytes(value) {
+  const n = Number(value || 0);
+  if (!Number.isFinite(n) || n <= 0) return "-";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let size = n;
+  let idx = 0;
+  while (size >= 1024 && idx < units.length - 1) {
+    size /= 1024;
+    idx += 1;
+  }
+  return `${size.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
+}
+
+async function scanLlamaCppArtifacts() {
+  setLlamaCppStatus("Scanning GGUF artifacts...");
+  try {
+    const data = await getJson("/api/providers/llama-cpp/artifacts/scan", { method: "POST" });
+    llamaCppArtifacts = data.artifacts || [];
+    renderLlamaCppArtifacts();
+    setLlamaCppStatus(`Found ${llamaCppArtifacts.length} GGUF files.`);
+  } catch (err) {
+    setLlamaCppStatus(`Scan failed: ${err}`, true);
+  }
+}
+
+async function deleteLlamaCppArtifact(path) {
+  const target = String(path || "").trim();
+  if (!target) return;
+  if (!window.confirm(`Delete GGUF "${target}"?`)) return;
+  setLlamaCppStatus(`Deleting ${target}...`);
+  try {
+    const data = await getJson("/api/providers/llama-cpp/artifacts", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: target }),
+    });
+    llamaCppArtifacts = data.artifacts || [];
+    renderLlamaCppArtifacts();
+    setLlamaCppStatus("GGUF deleted.");
+  } catch (err) {
+    setLlamaCppStatus(`Delete failed: ${err}`, true);
+  }
+}
+
+function renderLlamaCppDownload() {
+  const status = qs("#llama-cpp-download-status");
+  const logs = qs("#llama-cpp-download-logs");
+  if (!status) return;
+  const job = llamaCppDownload;
+  if (!job) {
+    status.textContent = "No download job.";
+    if (logs) logs.textContent = "";
+    return;
+  }
+  status.textContent = `${job.status || "unknown"}: ${job.repo_id || ""} ${job.filename || ""} -> ${job.target_path || ""}`;
+}
+
+function isLlamaCppDownloadActive() {
+  return !!(llamaCppDownload && ["starting", "running"].includes(llamaCppDownload.status));
+}
+
+function syncLlamaCppDownloadPolling() {
+  const shouldPoll = activeSettingsSection === "provider_llama_cpp" && isLlamaCppDownloadActive();
+  if (shouldPoll && !llamaCppDownloadTimer) {
+    llamaCppDownloadTimer = window.setInterval(() => refreshLlamaCppDownload(true), 3000);
+  } else if (!shouldPoll && llamaCppDownloadTimer) {
+    window.clearInterval(llamaCppDownloadTimer);
+    llamaCppDownloadTimer = null;
+  }
+}
+
+async function refreshLlamaCppDownload(showLogs = false) {
+  try {
+    const data = await getJson("/api/providers/llama-cpp/downloads/current");
+    const previousStatus = llamaCppDownload && llamaCppDownload.status;
+    llamaCppDownload = data.download || null;
+    renderLlamaCppDownload();
+    if (showLogs) await refreshLlamaCppDownloadLogs();
+    if (llamaCppDownload && llamaCppDownload.status === "completed" && previousStatus !== "completed") {
+      await scanLlamaCppArtifacts();
+    }
+    syncLlamaCppDownloadPolling();
+  } catch (err) {
+    setLlamaCppStatus(`Download status failed: ${err}`, true);
+    syncLlamaCppDownloadPolling();
+  }
+}
+
+async function refreshLlamaCppDownloadLogs() {
+  const logs = qs("#llama-cpp-download-logs");
+  if (!logs) return;
+  try {
+    const data = await getJson("/api/providers/llama-cpp/downloads/current/logs");
+    logs.textContent = data.logs || "";
+  } catch (err) {
+    logs.textContent = `Log read failed: ${err}`;
+  }
+}
+
+async function startLlamaCppDownload() {
+  const repo = (qs("#llama-cpp-hf-repo") || {}).value || "";
+  const filename = (qs("#llama-cpp-hf-file") || {}).value || "";
+  const token = (qs("#llama-cpp-hf-token") || {}).value || "";
+  if (token.trim()) {
+    try {
+      const data = await getJson("/api/providers/llama-cpp/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hf_token: token.trim() }),
+      });
+      llamaCppSettings = data.settings || llamaCppSettings;
+    } catch (err) {
+      setLlamaCppStatus(`Token save failed: ${err}`, true);
+      return;
+    }
+  }
+  setLlamaCppStatus("Starting GGUF download...");
+  try {
+    const data = await getJson("/api/providers/llama-cpp/downloads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repo_id: repo.trim(), filename: filename.trim() }),
+    });
+    llamaCppDownload = data.download || null;
+    renderLlamaCppDownload();
+    await refreshLlamaCppDownloadLogs();
+    syncLlamaCppDownloadPolling();
+    setLlamaCppStatus("Download started.");
+  } catch (err) {
+    setLlamaCppStatus(`Download start failed: ${err}`, true);
+  }
+}
+
+async function cancelLlamaCppDownload() {
+  if (!window.confirm("Cancel the active GGUF download? Partial files will remain.")) return;
+  try {
+    const data = await getJson("/api/providers/llama-cpp/downloads/current/cancel", { method: "POST" });
+    llamaCppDownload = data.download || null;
+    renderLlamaCppDownload();
+    syncLlamaCppDownloadPolling();
+    setLlamaCppStatus("Download cancelled.");
+  } catch (err) {
+    setLlamaCppStatus(`Cancel failed: ${err}`, true);
+  }
+}
+
+function profileValue(profile, key, fallback = "") {
+  if (!profile) return fallback;
+  const value = profile[key];
+  return value == null ? fallback : value;
+}
+
+function defaultLlamaCppCachePath(servedModelId) {
+  const served = String(servedModelId || "model").trim();
+  const safe = served.replace(/[^A-Za-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "") || "model";
+  const cacheDir = llamaCppSettings && llamaCppSettings.cache_dir ? llamaCppSettings.cache_dir : "/models/llama/.llm-agent-cache";
+  return `${cacheDir.replace(/\/+$/g, "")}/${safe}`;
+}
+
+function fillLlamaCppProfileCachePath() {
+  const cacheEnabled = qs('#llama-cpp-profile-form [data-profile-field="cache_enabled"]');
+  const cachePath = qs('#llama-cpp-profile-form [data-profile-field="cache_path"]');
+  const servedModel = qs('#llama-cpp-profile-form [data-profile-field="served_model_id"]');
+  const status = qs("#llama-cpp-profile-save-status");
+  if (!cacheEnabled || !cachePath) return;
+  if (!cacheEnabled.checked) {
+    if (status) status.textContent = "Profile changes take effect after restart.";
+    return;
+  }
+  if (!String(cachePath.value || "").trim()) {
+    cachePath.value = defaultLlamaCppCachePath(servedModel ? servedModel.value : "");
+  }
+  if (status) status.textContent = `Prompt cache will use slot path ${cachePath.value}`;
+}
+
+function openLlamaCppProfileEditor(profile = null, artifact = null) {
+  const isEdit = !!profile;
+  const settings = llamaCppSettings || {};
+  const ggufPath = profileValue(profile, "gguf_path", artifact ? artifact.path : "");
+  const hints = {
+    served_model_id: "Stable public name clients will request, e.g. qwen3-a3b:256k.",
+    gguf_path: "Full path below /models/llama. Use a scanned artifact when possible.",
+    port: "llama-server HTTP port. 8081 is the default for the first profile.",
+    ctx_size: "Context tokens. Try 4096 for smoke tests, 131072 or 262144 for long-context agents.",
+    n_gpu_layers: "GPU offload layers. Empty lets llama.cpp choose; 999 often means as many as possible.",
+    main_gpu: "Primary GPU index. Usually 0 for a single GPU.",
+    tensor_split: "Comma-separated VRAM split for multi-GPU, e.g. 24,16. Leave empty for one GPU.",
+    split_mode: "llama.cpp split mode such as layer or row. Leave empty unless tuning multi-GPU.",
+    threads: "CPU decode threads. Often physical cores or slightly below.",
+    threads_batch: "CPU prompt-processing threads. Often same as threads or higher.",
+    batch_size: "Prompt processing batch size. Common values: 512, 1024, 2048.",
+    ubatch_size: "Microbatch size. Common values: 128, 256, 512 when memory is tight.",
+    parallel: "Number of parallel slots. Use 1 for single-agent testing.",
+    cache_path: "llama-server slot cache directory. If empty and cache is enabled, llm-agent creates one.",
+    cache_mode: "Reserved for future slot-cache restore/save behavior; server startup currently uses read-write cache.",
+  };
+  const checkHints = {
+    flash_attn: "Usually worth enabling on supported GPUs/models; disable if llama.cpp errors.",
+    cont_batching: "Good default for server mode and multiple requests; safe to keep enabled.",
+    cache_enabled: "Enables llama.cpp prompt cache file usage for repeated long prefixes.",
+  };
+  const fieldHtml = (labelText, key, type, value) => `
+    <label class="profile-field">
+      <span>${escapeHtml(labelText)}</span>
+      <input type="${type}" data-profile-field="${key}" value="${escapeHtml(value == null ? "" : value)}" title="${escapeHtml(hints[key] || "")}" />
+      <small>${escapeHtml(hints[key] || "")}</small>
+    </label>`;
+  const fields = [
+    ["Served model ID", "served_model_id", "text", profileValue(profile, "served_model_id", "")],
+    ["GGUF path", "gguf_path", "text", ggufPath],
+    ["Port", "port", "number", profileValue(profile, "port", settings.default_port || 8081)],
+    ["Context", "ctx_size", "number", profileValue(profile, "ctx_size", 262144)],
+    ["GPU layers", "n_gpu_layers", "number", profileValue(profile, "n_gpu_layers", "")],
+    ["Main GPU", "main_gpu", "number", profileValue(profile, "main_gpu", "")],
+    ["Tensor split", "tensor_split", "text", profileValue(profile, "tensor_split", "")],
+    ["Split mode", "split_mode", "text", profileValue(profile, "split_mode", "")],
+    ["Threads", "threads", "number", profileValue(profile, "threads", "")],
+    ["Threads batch", "threads_batch", "number", profileValue(profile, "threads_batch", "")],
+    ["Batch size", "batch_size", "number", profileValue(profile, "batch_size", "")],
+    ["uBatch size", "ubatch_size", "number", profileValue(profile, "ubatch_size", "")],
+    ["Parallel", "parallel", "number", profileValue(profile, "parallel", "")],
+    ["Cache path", "cache_path", "text", profileValue(profile, "cache_path", "")],
+    ["Cache mode", "cache_mode", "text", profileValue(profile, "cache_mode", "rw")],
+  ];
+  const checks = [
+    ["Flash attention", "flash_attn", profileValue(profile, "flash_attn", false)],
+    ["Continuous batching", "cont_batching", profileValue(profile, "cont_batching", true)],
+    ["Prompt cache", "cache_enabled", profileValue(profile, "cache_enabled", false)],
+  ];
+  const extraArgs = Array.isArray(profile && profile.extra_args) ? profile.extra_args.join(" ") : "";
+  const body = `
+    <div id="llama-cpp-profile-form" class="profile-form">
+      <div class="profile-grid">
+        ${fields.map(([labelText, key, type, value]) => fieldHtml(labelText, key, type, value)).join("")}
+      </div>
+      ${checks.map(([labelText, key, checked]) => `
+        <label class="profile-check-row" title="${escapeHtml(checkHints[key] || "")}">
+          <input type="checkbox" data-profile-field="${key}" ${checked ? "checked" : ""} />
+          ${escapeHtml(labelText)}
+          <small>${escapeHtml(checkHints[key] || "")}</small>
+        </label>`).join("")}
+      <label class="profile-system">
+        <span>Extra args</span>
+        <textarea data-profile-field="extra_args" rows="3" title="Additional llama-server flags, split by spaces. Example: --cache-type-k q8_0 --cache-type-v q8_0">${escapeHtml(extraArgs)}</textarea>
+        <small>Additional llama-server flags, e.g. --cache-type-k q8_0 --cache-type-v q8_0.</small>
+      </label>
+      <div class="button-row top-gap">
+        <button type="button" class="primary" id="llama-cpp-profile-save-btn">${isEdit ? "Save profile" : "Create profile"}</button>
+      </div>
+      <p class="settings-save-status muted" id="llama-cpp-profile-save-status">Profile changes take effect after restart.</p>
+    </div>`;
+  openModal(isEdit ? "Edit llama.cpp profile" : "Create llama.cpp profile", body);
+  const cacheEnabled = qs('#llama-cpp-profile-form [data-profile-field="cache_enabled"]');
+  if (cacheEnabled) cacheEnabled.addEventListener("change", fillLlamaCppProfileCachePath);
+  const servedModel = qs('#llama-cpp-profile-form [data-profile-field="served_model_id"]');
+  if (servedModel) servedModel.addEventListener("input", fillLlamaCppProfileCachePath);
+  fillLlamaCppProfileCachePath();
+  const saveBtn = qs("#llama-cpp-profile-save-btn");
+  if (saveBtn) saveBtn.addEventListener("click", () => saveLlamaCppProfile(profile && profile.id));
+}
+
+function collectLlamaCppProfileForm() {
+  const payload = {};
+  qsa("#llama-cpp-profile-form [data-profile-field]").forEach((input) => {
+    const key = input.dataset.profileField;
+    if (input.type === "checkbox") payload[key] = input.checked;
+    else if (key === "extra_args") payload[key] = input.value.trim() ? input.value.trim().split(/\s+/) : [];
+    else payload[key] = input.value;
+  });
+  const cacheEnabled = qs('#llama-cpp-profile-form [data-profile-field="cache_enabled"]');
+  const cachePath = qs('#llama-cpp-profile-form [data-profile-field="cache_path"]');
+  if (cacheEnabled) payload.cache_enabled = !!cacheEnabled.checked;
+  if (cachePath) payload.cache_path = cachePath.value;
+  if (payload.cache_enabled && !String(payload.cache_path || "").trim()) {
+    payload.cache_path = defaultLlamaCppCachePath(payload.served_model_id);
+  }
+  return payload;
+}
+
+async function saveLlamaCppProfile(profileId = null) {
+  const isEdit = !!profileId;
+  const status = qs("#llama-cpp-profile-save-status");
+  const saveBtn = qs("#llama-cpp-profile-save-btn");
+  fillLlamaCppProfileCachePath();
+  const payload = collectLlamaCppProfileForm();
+  if (status) status.textContent = "Saving profile...";
+  if (saveBtn) saveBtn.disabled = true;
+  try {
+    const data = await getJson(isEdit ? `/api/providers/llama-cpp/profiles/${profileId}` : "/api/providers/llama-cpp/profiles", {
+      method: isEdit ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    llamaCppProfiles = data.profiles || [];
+    renderLlamaCppProfiles();
+    closeModal();
+    const saved = data.profile || {};
+    const cacheState = saved.cache_enabled ? `cache on (${saved.cache_path || "no path"})` : "cache off";
+    setLlamaCppStatus(`${isEdit ? "Profile saved" : "Profile created"}: ${cacheState}.`);
+  } catch (err) {
+    if (status) status.textContent = `Save failed: ${err}`;
+    setLlamaCppStatus(`Profile save failed: ${err}`, true);
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+  }
+}
+
+async function llamaCppProfileAction(profileId, action) {
+  setLlamaCppStatus(`${action} profile...`);
+  try {
+    const data = await getJson(`/api/providers/llama-cpp/profiles/${profileId}/${action}`, { method: "POST" });
+    llamaCppProfiles = data.profiles || [];
+    renderLlamaCppProfiles();
+    setLlamaCppStatus(`Profile ${action} requested.`);
+  } catch (err) {
+    setLlamaCppStatus(`${action} failed: ${err}`, true);
+  }
+}
+
+async function deleteLlamaCppProfile(profileId) {
+  if (!window.confirm("Delete this llama.cpp profile?")) return;
+  try {
+    const data = await getJson(`/api/providers/llama-cpp/profiles/${profileId}`, { method: "DELETE" });
+    llamaCppProfiles = data.profiles || [];
+    renderLlamaCppProfiles();
+    setLlamaCppStatus("Profile deleted.");
+  } catch (err) {
+    setLlamaCppStatus(`Delete failed: ${err}`, true);
+  }
+}
+
+async function showLlamaCppLogs(profileId) {
+  try {
+    const data = await getJson(`/api/providers/llama-cpp/profiles/${profileId}/logs`);
+    openModal("llama.cpp logs", `<pre class="log-tail">${escapeHtml(data.logs || "")}</pre>`);
+  } catch (err) {
+    setLlamaCppStatus(`Log read failed: ${err}`, true);
+  }
+}
+
+function renderLlamaCppArtifacts() {
+  const body = qs("#llama-cpp-artifact-body");
+  if (!body) return;
+  body.innerHTML = "";
+  if (!llamaCppArtifacts.length) {
+    const empty = document.createElement("div");
+    empty.className = "provider-model-empty";
+    empty.textContent = "No GGUF files scanned.";
+    body.appendChild(empty);
+    return;
+  }
+  llamaCppArtifacts.forEach((artifact) => {
+    const row = document.createElement("div");
+    row.className = "provider-model-row";
+    const name = document.createElement("strong");
+    name.textContent = artifact.name || artifact.path;
+    const path = document.createElement("span");
+    path.textContent = artifact.path;
+    const size = document.createElement("span");
+    size.textContent = formatBytes(artifact.size);
+    const actions = document.createElement("div");
+    actions.className = "provider-action-row";
+    const create = document.createElement("button");
+    create.type = "button";
+    create.className = "secondary";
+    create.textContent = "Create profile";
+    create.addEventListener("click", () => openLlamaCppProfileEditor(null, artifact));
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "danger";
+    remove.textContent = "Delete";
+    remove.addEventListener("click", () => deleteLlamaCppArtifact(artifact.path));
+    actions.append(create, remove);
+    row.append(name, path, size, actions);
+    body.appendChild(row);
+  });
+}
+
+function renderLlamaCppProfiles() {
+  const body = qs("#llama-cpp-profile-body");
+  if (!body) return;
+  body.innerHTML = "";
+  if (!llamaCppProfiles.length) {
+    const empty = document.createElement("div");
+    empty.className = "provider-model-empty";
+    empty.textContent = "No llama.cpp profiles.";
+    body.appendChild(empty);
+    return;
+  }
+  llamaCppProfiles.forEach((profile) => {
+    const row = document.createElement("div");
+    row.className = "provider-model-row";
+    const model = document.createElement("strong");
+    model.textContent = profile.served_model_id || profile.id;
+    const state = document.createElement("span");
+    state.textContent = `${profile.status || "unknown"} :${profile.port || ""}`;
+    const summary = document.createElement("span");
+    summary.textContent = `ctx ${profile.ctx_size || "-"} cache ${profile.cache_enabled ? "on" : "off"}`;
+    const actions = document.createElement("div");
+    actions.className = "provider-action-row";
+    [
+      ["Start", () => llamaCppProfileAction(profile.id, "start")],
+      ["Stop", () => llamaCppProfileAction(profile.id, "stop")],
+      ["Restart", () => llamaCppProfileAction(profile.id, "restart")],
+      ["Edit", () => openLlamaCppProfileEditor(profile)],
+      ["Logs", () => showLlamaCppLogs(profile.id)],
+      ["Delete", () => deleteLlamaCppProfile(profile.id)],
+    ].forEach(([text, handler]) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = text === "Delete" ? "danger" : "secondary";
+      btn.textContent = text;
+      btn.addEventListener("click", handler);
+      actions.appendChild(btn);
+    });
+    row.append(model, state, summary, actions);
+    body.appendChild(row);
+  });
+}
+
+function buildLlamaCppProviderSection() {
+  const grid = qs("#settings-field-grid");
+  if (!grid) return;
+  if (gpuStatusChart) {
+    gpuStatusChart.destroy();
+    gpuStatusChart = null;
+  }
+  grid.innerHTML = "";
+  grid.classList.remove("gpu-status-grid");
+  grid.classList.add("provider-grid");
+
+  const panel = document.createElement("div");
+  panel.className = "provider-panel";
+
+  const connection = document.createElement("div");
+  connection.className = "provider-pull-box provider-config-box";
+  [
+    ["SSH enabled", "ssh_enabled", "checkbox"],
+    ["SSH host", "ssh_host", "text"],
+    ["SSH user", "ssh_user", "text"],
+    ["SSH port", "ssh_port", "number"],
+    ["SSH key", "ssh_key", "text"],
+    ["Strict host key", "ssh_strict_host_key", "checkbox"],
+    ["Model dir", "model_dir", "text"],
+    ["llama-server", "binary_path", "text"],
+    ["Runtime dir", "runtime_dir", "text"],
+    ["Cache dir", "cache_dir", "text"],
+    ["Default port", "default_port", "number"],
+    ["HF token", "hf_token", "text"],
+  ].forEach(([label, key, type]) => connection.appendChild(llamaCppField(label, key, type)));
+
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "button";
+  saveBtn.className = "primary";
+  saveBtn.textContent = "Save settings";
+  saveBtn.addEventListener("click", saveLlamaCppSettings);
+  const testBtn = document.createElement("button");
+  testBtn.type = "button";
+  testBtn.className = "secondary";
+  testBtn.textContent = "Test SSH";
+  testBtn.addEventListener("click", testLlamaCppSsh);
+  const scanBtn = document.createElement("button");
+  scanBtn.type = "button";
+  scanBtn.className = "secondary";
+  scanBtn.textContent = "Scan GGUF";
+  scanBtn.addEventListener("click", scanLlamaCppArtifacts);
+  const cleanupBtn = document.createElement("button");
+  cleanupBtn.type = "button";
+  cleanupBtn.className = "secondary";
+  cleanupBtn.textContent = "Cleanup runtime";
+  cleanupBtn.addEventListener("click", cleanupLlamaCppRuntime);
+  connection.append(saveBtn, testBtn, scanBtn, cleanupBtn);
+
+  const downloadBox = document.createElement("div");
+  downloadBox.className = "provider-pull-box provider-config-box";
+  const repoLabel = document.createElement("label");
+  repoLabel.className = "provider-field";
+  repoLabel.innerHTML = "<span>Hugging Face repo</span>";
+  const repoInput = document.createElement("input");
+  repoInput.type = "text";
+  repoInput.id = "llama-cpp-hf-repo";
+  repoInput.placeholder = "Qwen/Qwen3.6-35B-A3B-GGUF";
+  repoLabel.appendChild(repoInput);
+  const fileLabel = document.createElement("label");
+  fileLabel.className = "provider-field";
+  fileLabel.innerHTML = "<span>GGUF filename</span>";
+  const fileInput = document.createElement("input");
+  fileInput.type = "text";
+  fileInput.id = "llama-cpp-hf-file";
+  fileInput.placeholder = "Qwen3.6-35B-A3B-Q4_K_M.gguf";
+  fileLabel.appendChild(fileInput);
+  const tokenLabel = document.createElement("label");
+  tokenLabel.className = "provider-field";
+  tokenLabel.innerHTML = "<span>Optional HF token</span>";
+  const tokenInput = document.createElement("input");
+  tokenInput.type = "password";
+  tokenInput.id = "llama-cpp-hf-token";
+  tokenInput.placeholder = llamaCppSettings && llamaCppSettings.hf_token_configured ? "Configured" : "";
+  tokenLabel.appendChild(tokenInput);
+  const startDownloadBtn = document.createElement("button");
+  startDownloadBtn.type = "button";
+  startDownloadBtn.className = "primary";
+  startDownloadBtn.textContent = "Download GGUF";
+  startDownloadBtn.addEventListener("click", startLlamaCppDownload);
+  const cancelDownloadBtn = document.createElement("button");
+  cancelDownloadBtn.type = "button";
+  cancelDownloadBtn.className = "secondary";
+  cancelDownloadBtn.textContent = "Cancel";
+  cancelDownloadBtn.addEventListener("click", cancelLlamaCppDownload);
+  const refreshDownloadBtn = document.createElement("button");
+  refreshDownloadBtn.type = "button";
+  refreshDownloadBtn.className = "secondary";
+  refreshDownloadBtn.textContent = "Refresh download";
+  refreshDownloadBtn.addEventListener("click", () => refreshLlamaCppDownload(true));
+  const downloadStatus = document.createElement("p");
+  downloadStatus.className = "settings-save-status muted";
+  downloadStatus.id = "llama-cpp-download-status";
+  downloadStatus.textContent = "No download job.";
+  const downloadLogs = document.createElement("pre");
+  downloadLogs.className = "log-tail";
+  downloadLogs.id = "llama-cpp-download-logs";
+  downloadBox.append(repoLabel, fileLabel, tokenLabel, startDownloadBtn, cancelDownloadBtn, refreshDownloadBtn, downloadStatus, downloadLogs);
+
+  const artifactTable = document.createElement("div");
+  artifactTable.className = "provider-model-table";
+  const artifactHead = document.createElement("div");
+  artifactHead.className = "provider-model-row provider-model-head";
+  ["Artifact", "Path", "Size", "Actions"].forEach((text) => {
+    const node = document.createElement("span");
+    node.textContent = text;
+    artifactHead.appendChild(node);
+  });
+  const artifactBody = document.createElement("div");
+  artifactBody.id = "llama-cpp-artifact-body";
+  artifactTable.append(artifactHead, artifactBody);
+
+  const profileTable = document.createElement("div");
+  profileTable.className = "provider-model-table";
+  const profileHead = document.createElement("div");
+  profileHead.className = "provider-model-row provider-model-head";
+  ["Model", "State", "Runtime", "Actions"].forEach((text) => {
+    const node = document.createElement("span");
+    node.textContent = text;
+    profileHead.appendChild(node);
+  });
+  const profileBody = document.createElement("div");
+  profileBody.id = "llama-cpp-profile-body";
+  profileTable.append(profileHead, profileBody);
+
+  const createBtn = document.createElement("button");
+  createBtn.type = "button";
+  createBtn.className = "secondary";
+  createBtn.textContent = "New profile";
+  createBtn.addEventListener("click", () => openLlamaCppProfileEditor());
+
+  const status = document.createElement("p");
+  status.className = "settings-save-status muted";
+  status.id = "llama-cpp-provider-status";
+  status.textContent = "Loading llama.cpp provider...";
+
+  panel.append(connection, downloadBox, createBtn, artifactTable, profileTable, status);
+  grid.appendChild(panel);
+  refreshLlamaCppProvider();
+  renderLlamaCppArtifacts();
+  renderLlamaCppDownload();
+  syncLlamaCppDownloadPolling();
+}
+
 function buildOllamaProviderSection() {
   const grid = qs("#settings-field-grid");
   if (!grid) return;
@@ -1827,6 +2491,9 @@ function renderSettingsSection(sectionId) {
   const visibleFields = (section.fields || []).filter((field) => settingsAdvanced || !field.advanced);
 
   activeSettingsSection = sectionId;
+  if (sectionId !== "provider_llama_cpp") {
+    syncLlamaCppDownloadPolling();
+  }
   settingsDirty = false;
   setText("settings-section-title", section.title || "Settings");
   setSettingsSaveStatus(section.editable ? "No changes." : "Read-only branch.");
@@ -1856,6 +2523,18 @@ function renderSettingsSection(sectionId) {
     const effectiveWrap = qs("#settings-effective-wrap");
     if (effectiveWrap) effectiveWrap.classList.add("hidden");
     setSettingsSaveStatus("Provider model management.");
+    updateSettingsSaveButton(section);
+    syncGpuStatusAutoRefresh();
+    return;
+  }
+
+  if (section.custom === "provider_llama_cpp") {
+    buildLlamaCppProviderSection();
+    const table = qs("#settings-effective-table");
+    if (table) table.innerHTML = "";
+    const effectiveWrap = qs("#settings-effective-wrap");
+    if (effectiveWrap) effectiveWrap.classList.add("hidden");
+    setSettingsSaveStatus("Provider runtime management.");
     updateSettingsSaveButton(section);
     syncGpuStatusAutoRefresh();
     return;

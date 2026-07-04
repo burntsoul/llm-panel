@@ -840,6 +840,38 @@ button:disabled {
   border-radius: var(--radius-sm);
 }
 
+.provider-config-box {
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+}
+
+.provider-field {
+  display: grid;
+  gap: 4px;
+}
+
+.provider-config-box .provider-field {
+  grid-column: auto;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.provider-field span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.provider-field input[type="checkbox"] {
+  width: auto;
+  min-width: 0;
+  justify-self: start;
+}
+
+.log-tail {
+  max-height: 60vh;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
 .provider-model-table {
   border: 1px solid #e5d8c6;
   background: #fff8ee;
@@ -948,6 +980,21 @@ button:disabled {
   padding: 0.4rem 0.5rem;
   border-radius: var(--radius-sm);
   font: inherit;
+}
+
+.profile-field small,
+.profile-system small,
+.profile-check-row small {
+  color: #7c6d5c;
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.25;
+}
+
+.profile-check-row small {
+  display: block;
+  margin-left: 1.35rem;
+  margin-top: 0.15rem;
 }
 
 button.danger {
