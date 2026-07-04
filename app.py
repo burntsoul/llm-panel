@@ -2201,16 +2201,22 @@ async def _resolve_provider_for_payload(payload: dict) -> tuple[str | None, str 
         profile = llama_cpp_provider.find_profile_by_model(public_model)
         if profile:
             payload["model"] = public_model
+            _apply_llama_cpp_request_options(payload, profile)
             loop = asyncio.get_running_loop()
             try:
                 ok, message = await loop.run_in_executor(None, _ensure_llama_cpp_host_running)
                 if not ok:
                     raise RuntimeError(message)
                 status = await loop.run_in_executor(None, lambda: llama_cpp_provider.status_for_profile(profile))
-                if _should_start_llama_cpp_profile(status):
+                did_start = _should_start_llama_cpp_profile(status)
+                if did_start:
                     await loop.run_in_executor(None, lambda: llama_cpp_provider.start_profile(str(profile["id"])))
                 refreshed = llama_cpp_provider.find_profile(str(profile["id"])) or profile
-                ready = await loop.run_in_executor(None, lambda: llama_cpp_provider.wait_until_ready(refreshed, timeout=5))
+                ready_timeout = _llama_cpp_readiness_timeout(did_start)
+                ready = await loop.run_in_executor(
+                    None,
+                    lambda: llama_cpp_provider.wait_until_ready(refreshed, timeout=ready_timeout),
+                )
             except Exception as exc:
                 raise HTTPException(
                     status_code=503,
@@ -2264,19 +2270,91 @@ def _should_start_llama_cpp_profile(status: dict) -> bool:
     return status.get("status") != "running"
 
 
-def _rewrite_upstream_json(payload: dict, public_model: str | None, upstream_model: str | None) -> dict:
+def _llama_cpp_readiness_timeout(did_start: bool) -> int | None:
+    return None if did_start else 5
+
+
+def _apply_llama_cpp_request_options(payload: dict, profile: dict) -> None:
+    if not isinstance(payload, dict):
+        return
+    if profile.get("cache_enabled") and "cache_prompt" not in payload:
+        payload["cache_prompt"] = True
+
+
+def _annotate_llama_cpp_cached_tokens(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        return payload
+    timings = payload.get("timings")
+    if not isinstance(timings, dict):
+        return payload
+    cache_n = timings.get("cache_n")
+    if not isinstance(cache_n, int):
+        return payload
+    usage = payload.setdefault("usage", {})
+    if not isinstance(usage, dict):
+        usage = {}
+        payload["usage"] = usage
+    details = usage.setdefault("prompt_tokens_details", {})
+    if not isinstance(details, dict):
+        details = {}
+        usage["prompt_tokens_details"] = details
+    details["cached_tokens"] = max(int(details.get("cached_tokens") or 0), cache_n)
+    return payload
+
+
+def _rewrite_upstream_json(
+    payload: dict,
+    public_model: str | None,
+    upstream_model: str | None,
+    upstream_provider: str | None = None,
+) -> dict:
+    if upstream_provider == "llama_cpp":
+        payload = _annotate_llama_cpp_cached_tokens(payload)
     if not public_model or not upstream_model:
         return payload
     return rewrite_model_ids(payload, public_model, upstream_model)
 
 
-async def _rewrite_upstream_sse_chunks(byte_iter, public_model: str | None, upstream_model: str | None):
-    backing = (upstream_model or "").encode("utf-8")
-    public = (public_model or "").encode("utf-8")
-    async for chunk in byte_iter:
+def _rewrite_sse_line(
+    line: bytes,
+    public_model: str | None,
+    upstream_model: str | None,
+    upstream_provider: str | None = None,
+) -> bytes:
+    if not line.strip().startswith(b"data:"):
+        return line
+    prefix, data = line.split(b":", 1)
+    stripped = data.strip()
+    if not stripped or stripped == b"[DONE]":
+        return line
+    try:
+        payload = json.loads(stripped.decode("utf-8"))
+    except Exception:
+        backing = (upstream_model or "").encode("utf-8")
+        public = (public_model or "").encode("utf-8")
         if backing and public and backing != public:
-            chunk = chunk.replace(backing, public)
-        yield chunk
+            line = line.replace(backing, public)
+        return line
+    if isinstance(payload, dict):
+        payload = _rewrite_upstream_json(payload, public_model, upstream_model, upstream_provider)
+        return prefix + b": " + json.dumps(payload).encode("utf-8")
+    return line
+
+
+async def _rewrite_upstream_sse_chunks(
+    byte_iter,
+    public_model: str | None,
+    upstream_model: str | None,
+    upstream_provider: str | None = None,
+):
+    buffer = b""
+    async for chunk in byte_iter:
+        buffer += chunk
+        while b"\n" in buffer:
+            line, buffer = buffer.split(b"\n", 1)
+            yield _rewrite_sse_line(line, public_model, upstream_model, upstream_provider) + b"\n"
+    if buffer:
+        yield _rewrite_sse_line(buffer, public_model, upstream_model, upstream_provider)
 
 
 @app.get("/v1/models")
@@ -2426,6 +2504,7 @@ async def chat_completions(request: Request):
                         upstream_resp.aiter_bytes(),
                         public_model,
                         upstream_model,
+                        upstream_provider,
                     ):
                         yield chunk
 
@@ -2471,7 +2550,7 @@ async def chat_completions(request: Request):
         except Exception:
             pass
 
-    data = _rewrite_upstream_json(data, public_model, upstream_model)
+    data = _rewrite_upstream_json(data, public_model, upstream_model, upstream_provider)
 
     return JSONResponse(status_code=upstream_resp.status_code, content=data)
 
@@ -2507,7 +2586,7 @@ async def completions(request: Request):
                 }
             )
 
-        return {
+        mapped = {
             "id": payload.get("id"),
             "object": "text_completion",
             "created": payload.get("created"),
@@ -2515,6 +2594,9 @@ async def completions(request: Request):
             "choices": choices_out,
             "usage": payload.get("usage"),
         }
+        if "timings" in payload:
+            mapped["timings"] = payload.get("timings")
+        return mapped
 
     def _chat_chunk_to_completion_chunk(payload: dict) -> dict:
         """Map a chat-completions stream chunk to legacy completion chunk."""
@@ -2537,13 +2619,18 @@ async def completions(request: Request):
                 }
             )
 
-        return {
+        mapped = {
             "id": payload.get("id"),
             "object": "text_completion",
             "created": payload.get("created"),
             "model": payload.get("model"),
             "choices": choices_out,
         }
+        if "usage" in payload:
+            mapped["usage"] = payload.get("usage")
+        if "timings" in payload:
+            mapped["timings"] = payload.get("timings")
+        return mapped
     body_bytes = await request.body()
     try:
         body = json.loads(body_bytes.decode("utf-8"))
@@ -2688,7 +2775,7 @@ async def completions(request: Request):
                             except Exception:
                                 continue
                             mapped = _chat_chunk_to_completion_chunk(payload)
-                            mapped = _rewrite_upstream_json(mapped, public_model, upstream_model)
+                            mapped = _rewrite_upstream_json(mapped, public_model, upstream_model, upstream_provider)
                             out = json.dumps(mapped).encode("utf-8")
                             yield b"data: " + out + b"\n\n"
 
@@ -2703,7 +2790,7 @@ async def completions(request: Request):
                     if upstream_resp.status_code in (404, 405):
                         # Fallback: emulate completions via chat/completions and map stream chunks.
                         logger.info("upstream /v1/completions unsupported; falling back to chat proxy")
-                        async for item in _stream_from_chat_fallback(prompt, body, headers):
+                        async for item in _stream_from_chat_fallback(prompt, upstream_payload, headers):
                             yield item
                         return
 
@@ -2711,6 +2798,7 @@ async def completions(request: Request):
                         upstream_resp.aiter_bytes(),
                         public_model,
                         upstream_model,
+                        upstream_provider,
                     ):
                         yield chunk
 
@@ -2732,7 +2820,7 @@ async def completions(request: Request):
         if system_prompt:
             messages.insert(0, {"role": "system", "content": system_prompt})
 
-        chat_payload = dict(body)
+        chat_payload = dict(upstream_payload)
         chat_payload["messages"] = messages
         chat_payload.pop("prompt", None)
         chat_payload.pop("system_prompt", None)
@@ -2763,7 +2851,7 @@ async def completions(request: Request):
             )
 
         mapped = _chat_to_completion_response(data)
-        mapped = _rewrite_upstream_json(mapped, public_model, upstream_model)
+        mapped = _rewrite_upstream_json(mapped, public_model, upstream_model, upstream_provider)
         return JSONResponse(status_code=upstream_resp.status_code, content=mapped)
 
     try:
@@ -2780,7 +2868,7 @@ async def completions(request: Request):
         )
 
     # Upstream already returned a completion-shaped response; return as-is.
-    data = _rewrite_upstream_json(data, public_model, upstream_model)
+    data = _rewrite_upstream_json(data, public_model, upstream_model, upstream_provider)
     return JSONResponse(status_code=upstream_resp.status_code, content=data)
 
 

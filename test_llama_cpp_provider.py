@@ -88,6 +88,13 @@ class TestLlamaCppProvider(unittest.TestCase):
         self.assertIn("262144", args)
         self.assertIn("--flash-attn", args)
         self.assertIn("--cache-prompt", args)
+        self.assertIn("--cache-ram", args)
+        self.assertIn("8192", args)
+        self.assertIn("--cache-idle-slots", args)
+        self.assertIn("--ctx-checkpoints", args)
+        self.assertIn("32", args)
+        self.assertIn("--checkpoint-min-step", args)
+        self.assertIn("256", args)
         self.assertIn("--slot-save-path", args)
         self.assertNotIn("--prompt-cache", args)
         self.assertIn("--no-mmap", args)
@@ -130,6 +137,40 @@ class TestLlamaCppProvider(unittest.TestCase):
         self.assertFalse(app_module._should_start_llama_cpp_profile({"status": "running"}))
         self.assertTrue(app_module._should_start_llama_cpp_profile({"status": "stopped"}))
         self.assertTrue(app_module._should_start_llama_cpp_profile({"status": "unknown"}))
+
+    def test_llama_cpp_readiness_timeout_policy(self):
+        self.assertIsNone(app_module._llama_cpp_readiness_timeout(did_start=True))
+        self.assertEqual(app_module._llama_cpp_readiness_timeout(did_start=False), 5)
+
+    def test_llama_cpp_request_options_enable_cache_prompt(self):
+        payload = {"model": "qwen-local:planner"}
+
+        app_module._apply_llama_cpp_request_options(payload, {"cache_enabled": True})
+
+        self.assertTrue(payload["cache_prompt"])
+
+    def test_llama_cpp_request_options_preserve_explicit_cache_prompt(self):
+        payload = {"model": "qwen-local:planner", "cache_prompt": False}
+
+        app_module._apply_llama_cpp_request_options(payload, {"cache_enabled": True})
+
+        self.assertFalse(payload["cache_prompt"])
+
+    def test_llama_cpp_cached_tokens_are_mirrored_to_openai_usage(self):
+        payload = {
+            "model": "qwen-local:planner",
+            "timings": {"cache_n": 512},
+            "usage": {"prompt_tokens_details": {"cached_tokens": 0}},
+        }
+
+        rewritten = app_module._rewrite_upstream_json(
+            payload,
+            "qwen-local:planner",
+            "qwen-local:planner",
+            "llama_cpp",
+        )
+
+        self.assertEqual(rewritten["usage"]["prompt_tokens_details"]["cached_tokens"], 512)
 
     @patch.object(app_module.settings, "ENFORCE_EXCLUSIVE_VMS", True)
     @patch("app.llama_cpp_provider.run_ssh", return_value=(True, "llm-agent-ssh-ok"))

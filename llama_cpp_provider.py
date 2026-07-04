@@ -53,6 +53,11 @@ RUNTIME_DEFAULTS: Dict[str, Any] = {
     "cache_enabled": False,
     "cache_path": "",
     "cache_mode": "rw",
+    "cache_ram": 8192,
+    "cache_idle_slots": True,
+    "cache_reuse": 0,
+    "ctx_checkpoints": 32,
+    "checkpoint_min_step": 256,
     "extra_args": [],
 }
 
@@ -445,7 +450,20 @@ def _profile_runtime(values: Dict[str, Any]) -> Dict[str, Any]:
         runtime["extra_args"] = shlex.split(runtime["extra_args"])
     if not isinstance(runtime.get("extra_args"), list):
         runtime["extra_args"] = []
-    for key in ["ctx_size", "n_gpu_layers", "main_gpu", "threads", "threads_batch", "batch_size", "ubatch_size", "parallel"]:
+    for key in [
+        "ctx_size",
+        "n_gpu_layers",
+        "main_gpu",
+        "threads",
+        "threads_batch",
+        "batch_size",
+        "ubatch_size",
+        "parallel",
+        "cache_ram",
+        "cache_reuse",
+        "ctx_checkpoints",
+        "checkpoint_min_step",
+    ]:
         value = runtime.get(key)
         if value in ("", None):
             runtime[key] = None if key != "ctx_size" else 0
@@ -454,6 +472,7 @@ def _profile_runtime(values: Dict[str, Any]) -> Dict[str, Any]:
     runtime["flash_attn"] = _coerce_bool(runtime.get("flash_attn"))
     runtime["cont_batching"] = _coerce_bool(runtime.get("cont_batching"))
     runtime["cache_enabled"] = _coerce_bool(runtime.get("cache_enabled"))
+    runtime["cache_idle_slots"] = _coerce_bool(runtime.get("cache_idle_slots"))
     return runtime
 
 
@@ -611,6 +630,20 @@ def build_llama_server_args(profile: Dict[str, Any], cfg: Optional[Dict[str, Any
         args.append("--cont-batching")
     if profile.get("cache_enabled"):
         args.append("--cache-prompt")
+        cache_ram = profile.get("cache_ram", 8192)
+        if cache_ram not in (None, ""):
+            args.extend(["--cache-ram", str(cache_ram)])
+        if profile.get("cache_idle_slots", True):
+            args.append("--cache-idle-slots")
+        cache_reuse = profile.get("cache_reuse")
+        if cache_reuse not in (None, "", 0):
+            args.extend(["--cache-reuse", str(cache_reuse)])
+        ctx_checkpoints = profile.get("ctx_checkpoints", 32)
+        if ctx_checkpoints not in (None, ""):
+            args.extend(["--ctx-checkpoints", str(ctx_checkpoints)])
+        checkpoint_min_step = profile.get("checkpoint_min_step", 256)
+        if checkpoint_min_step not in (None, ""):
+            args.extend(["--checkpoint-min-step", str(checkpoint_min_step)])
         args.extend(["--slot-save-path", _slot_cache_path(profile, provider_settings)])
     for item in profile.get("extra_args") or []:
         if item is not None and str(item).strip():

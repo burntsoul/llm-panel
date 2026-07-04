@@ -2029,11 +2029,16 @@ function openLlamaCppProfileEditor(profile = null, artifact = null) {
     parallel: "Number of parallel slots. Use 1 for single-agent testing.",
     cache_path: "llama-server slot cache directory. If empty and cache is enabled, llm-agent creates one.",
     cache_mode: "Reserved for future slot-cache restore/save behavior; server startup currently uses read-write cache.",
+    cache_ram: "Prompt cache RAM budget in MiB. 8192 matches llama-server's common default.",
+    cache_reuse: "Minimum chunk size for KV-shift cache reuse. Leave 0 until tuning.",
+    ctx_checkpoints: "Context checkpoints per slot. 32 is a good default for finding reusable prefixes.",
+    checkpoint_min_step: "Minimum token spacing between checkpoints. 256 is the llama-server default.",
   };
   const checkHints = {
     flash_attn: "Usually worth enabling on supported GPUs/models; disable if llama.cpp errors.",
     cont_batching: "Good default for server mode and multiple requests; safe to keep enabled.",
     cache_enabled: "Enables llama.cpp prompt cache file usage for repeated long prefixes.",
+    cache_idle_slots: "Saves idle slots into the prompt cache before they are reused by another request.",
   };
   const fieldHtml = (labelText, key, type, value) => `
     <label class="profile-field">
@@ -2057,11 +2062,16 @@ function openLlamaCppProfileEditor(profile = null, artifact = null) {
     ["Parallel", "parallel", "number", profileValue(profile, "parallel", "")],
     ["Cache path", "cache_path", "text", profileValue(profile, "cache_path", "")],
     ["Cache mode", "cache_mode", "text", profileValue(profile, "cache_mode", "rw")],
+    ["Cache RAM MiB", "cache_ram", "number", profileValue(profile, "cache_ram", 8192)],
+    ["Cache reuse", "cache_reuse", "number", profileValue(profile, "cache_reuse", 0)],
+    ["Ctx checkpoints", "ctx_checkpoints", "number", profileValue(profile, "ctx_checkpoints", 32)],
+    ["Checkpoint min step", "checkpoint_min_step", "number", profileValue(profile, "checkpoint_min_step", 256)],
   ];
   const checks = [
     ["Flash attention", "flash_attn", profileValue(profile, "flash_attn", false)],
     ["Continuous batching", "cont_batching", profileValue(profile, "cont_batching", true)],
     ["Prompt cache", "cache_enabled", profileValue(profile, "cache_enabled", false)],
+    ["Cache idle slots", "cache_idle_slots", profileValue(profile, "cache_idle_slots", true)],
   ];
   const extraArgs = Array.isArray(profile && profile.extra_args) ? profile.extra_args.join(" ") : "";
   const body = `
