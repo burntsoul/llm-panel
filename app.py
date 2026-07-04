@@ -2203,6 +2203,9 @@ async def _resolve_provider_for_payload(payload: dict) -> tuple[str | None, str 
             payload["model"] = public_model
             loop = asyncio.get_running_loop()
             try:
+                ok, message = await loop.run_in_executor(None, _ensure_llama_cpp_host_running)
+                if not ok:
+                    raise RuntimeError(message)
                 status = await loop.run_in_executor(None, lambda: llama_cpp_provider.status_for_profile(profile))
                 if _should_start_llama_cpp_profile(status):
                     await loop.run_in_executor(None, lambda: llama_cpp_provider.start_profile(str(profile["id"])))
@@ -2222,6 +2225,39 @@ async def _resolve_provider_for_payload(payload: dict) -> tuple[str | None, str 
 
     public, upstream = _resolve_request_model(payload)
     return public, upstream, settings.LLM_SERVER_BASE, "ollama"
+
+
+def _ensure_llama_cpp_host_running() -> tuple[bool, str]:
+    if settings.ENFORCE_EXCLUSIVE_VMS:
+        try:
+            win_status = get_vm_status(settings.WINDOWS_VM_ID)
+        except Exception as exc:
+            return False, f"Windows VM status unavailable: {exc}"
+        if win_status == "running":
+            return False, "Windows VM is running. Stop it before starting the LLM VM."
+
+    try:
+        llm_status = get_vm_status(settings.LLM_VM_ID)
+    except Exception as exc:
+        return False, f"LLM VM status unavailable: {exc}"
+
+    if llm_status != "running":
+        ok, message = start_vm(settings.LLM_VM_ID, wait_running=True, timeout_s=90)
+        if not ok:
+            return False, f"LLM VM start failed: {message}"
+
+    deadline = time.time() + float(settings.LLM_BOOT_TIMEOUT)
+    last_error = ""
+    while time.time() < deadline:
+        ok, output = llama_cpp_provider.run_ssh("printf llm-agent-ssh-ok", timeout=5)
+        if ok:
+            touch_activity()
+            return True, "LLM VM is running and SSH is ready."
+        last_error = output
+        time.sleep(float(settings.LLM_POLL_INTERVAL))
+
+    detail = f": {last_error}" if last_error else ""
+    return False, f"LLM VM SSH readiness timed out{detail}"
 
 
 def _should_start_llama_cpp_profile(status: dict) -> bool:

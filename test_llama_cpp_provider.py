@@ -131,6 +131,40 @@ class TestLlamaCppProvider(unittest.TestCase):
         self.assertTrue(app_module._should_start_llama_cpp_profile({"status": "stopped"}))
         self.assertTrue(app_module._should_start_llama_cpp_profile({"status": "unknown"}))
 
+    @patch.object(app_module.settings, "ENFORCE_EXCLUSIVE_VMS", True)
+    @patch("app.llama_cpp_provider.run_ssh", return_value=(True, "llm-agent-ssh-ok"))
+    @patch("app.start_vm")
+    @patch("app.get_vm_status", side_effect=["stopped", "stopped"])
+    def test_llama_cpp_host_wake_starts_llm_vm(self, get_vm_status, start_vm, _ssh):
+        start_vm.return_value = (True, "started")
+
+        ok, message = app_module._ensure_llama_cpp_host_running()
+
+        self.assertTrue(ok, message)
+        get_vm_status.assert_any_call(app_module.settings.WINDOWS_VM_ID)
+        get_vm_status.assert_any_call(app_module.settings.LLM_VM_ID)
+        start_vm.assert_called_once_with(app_module.settings.LLM_VM_ID, wait_running=True, timeout_s=90)
+
+    @patch.object(app_module.settings, "ENFORCE_EXCLUSIVE_VMS", True)
+    @patch("app.llama_cpp_provider.run_ssh", return_value=(True, "llm-agent-ssh-ok"))
+    @patch("app.start_vm")
+    @patch("app.get_vm_status", side_effect=["stopped", "running"])
+    def test_llama_cpp_host_wake_skips_start_when_running(self, _get_vm_status, start_vm, _ssh):
+        ok, message = app_module._ensure_llama_cpp_host_running()
+
+        self.assertTrue(ok, message)
+        start_vm.assert_not_called()
+
+    @patch.object(app_module.settings, "ENFORCE_EXCLUSIVE_VMS", True)
+    @patch("app.start_vm")
+    @patch("app.get_vm_status", return_value="running")
+    def test_llama_cpp_host_wake_respects_windows_exclusivity(self, _get_vm_status, start_vm):
+        ok, message = app_module._ensure_llama_cpp_host_running()
+
+        self.assertFalse(ok)
+        self.assertIn("Windows VM is running", message)
+        start_vm.assert_not_called()
+
     def test_runtime_cleanup_skips_hf_download_pid(self):
         command = llama_cpp_provider._cleanup_runtime_pids_remote(
             llama_cpp_provider.get_provider_settings(),
