@@ -26,9 +26,10 @@ class TestModelProfiles(unittest.TestCase):
         self.meta_path.write_text(json.dumps(data), encoding="utf-8")
         models.invalidate_model_cache()
 
+    @patch("models.llama_cpp_provider.list_profiles", return_value=[])
     @patch("models.llm_server_up", return_value=True)
     @patch("models.requests.get")
-    def test_private_backing_models_are_hidden_from_public_lists(self, get_mock, _up_mock):
+    def test_private_backing_models_are_hidden_from_public_lists(self, get_mock, _up_mock, _llama_mock):
         backing = models.profile_backing_model_name("gemma4:12b")
         self._write_meta(
             {
@@ -92,6 +93,51 @@ class TestModelProfiles(unittest.TestCase):
         get_mock.return_value.json.return_value = {"models": [{"name": "qwen2.5-coder:7b"}]}
 
         self.assertEqual(models.resolve_model_for_upstream("qwen2.5-coder:7b"), "qwen2.5-coder:7b")
+
+    @patch("models.llama_cpp_provider.list_profiles", return_value=[])
+    @patch("models.llm_server_up", return_value=True)
+    @patch("models.requests.get")
+    def test_alias_public_status_uses_raw_ollama_name_for_presence(self, get_mock, _up_mock, _llama_mock):
+        self._write_meta(
+            {
+                "gemma4:12b": {
+                    "source": "local",
+                    "device": "gpu",
+                    "alias": "coding-planner",
+                }
+            }
+        )
+        get_mock.return_value.raise_for_status.return_value = None
+        get_mock.return_value.json.return_value = {"models": [{"name": "gemma4:12b"}]}
+
+        rows = models.get_model_table_status()
+
+        self.assertEqual([row["id"] for row in rows], ["coding-planner"])
+        self.assertEqual(rows[0]["raw_model_name"], "gemma4:12b")
+        self.assertTrue(rows[0]["present_now"])
+        self.assertTrue(rows[0]["base_present_now"])
+
+    @patch("models.llm_server_up", return_value=True)
+    @patch("models.requests.get")
+    def test_ollama_provider_status_uses_raw_names_when_alias_exists(self, get_mock, _up_mock):
+        self._write_meta(
+            {
+                "gemma4:12b": {
+                    "source": "local",
+                    "device": "gpu",
+                    "alias": "coding-planner",
+                }
+            }
+        )
+        get_mock.return_value.raise_for_status.return_value = None
+        get_mock.return_value.json.return_value = {"models": [{"name": "gemma4:12b"}]}
+
+        rows = models.get_ollama_provider_model_status()
+
+        self.assertEqual([row["id"] for row in rows], ["gemma4:12b"])
+        self.assertEqual(rows[0]["alias"], "coding-planner")
+        self.assertEqual(rows[0]["display_id"], "coding-planner")
+        self.assertTrue(rows[0]["present_now"])
 
 
 if __name__ == "__main__":

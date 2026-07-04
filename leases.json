@@ -1,3 +1,76 @@
 {
-  "leases": {}
+  "leases": {
+    "4d3384ad-206c-43c0-83aa-16eb196f4a5e": {
+      "lease_id": "4d3384ad-206c-43c0-83aa-16eb196f4a5e",
+      "client_id": "test-client",
+      "purpose": "testing",
+      "ttl_seconds": 3600,
+      "created_at": "2026-07-04T21:30:12.238295",
+      "last_seen": "2026-07-04T21:30:12.238295",
+      "expires_at": "2026-07-04T22:30:12.238295"
+    },
+    "d0538228-76e1-4a05-824d-f8a20cb52373": {
+      "lease_id": "d0538228-76e1-4a05-824d-f8a20cb52373",
+      "client_id": "test-client",
+      "purpose": "testing",
+      "ttl_seconds": 3600,
+      "created_at": "2026-07-04T21:30:12.241107",
+      "last_seen": "2026-07-04T21:30:12.241107",
+      "expires_at": "2026-07-04T22:30:12.241107"
+    },
+    "c1ba9862-1bbb-49e0-aa4b-42c231156c1b": {
+      "lease_id": "c1ba9862-1bbb-49e0-aa4b-42c231156c1b",
+      "client_id": "test-client",
+      "purpose": "testing",
+      "ttl_seconds": 3600,
+      "created_at": "2026-07-04T21:30:12.295769",
+      "last_seen": "2026-07-04T21:30:12.301367",
+      "expires_at": "2026-07-04T22:30:12.301367"
+    },
+    "f6e2820e-27a8-4505-8a06-2809a07ee3e0": {
+      "lease_id": "f6e2820e-27a8-4505-8a06-2809a07ee3e0",
+      "client_id": "test-client",
+      "purpose": "testing",
+      "ttl_seconds": 7200,
+      "created_at": "2026-07-04T21:30:12.303729",
+      "last_seen": "2026-07-04T21:30:12.307382",
+      "expires_at": "2026-07-04T23:30:12.307382"
+    },
+    "3345dbb6-4eba-46ae-9aec-6d83b27f4b5c": {
+      "lease_id": "3345dbb6-4eba-46ae-9aec-6d83b27f4b5c",
+      "client_id": "test-client",
+      "purpose": "testing",
+      "ttl_seconds": 3600,
+      "created_at": "2026-07-04T21:49:49.465790",
+      "last_seen": "2026-07-04T21:49:49.465790",
+      "expires_at": "2026-07-04T22:49:49.465790"
+    },
+    "7b80f53e-4cdd-478a-9303-d44b3a2c3a0b": {
+      "lease_id": "7b80f53e-4cdd-478a-9303-d44b3a2c3a0b",
+      "client_id": "test-client",
+      "purpose": "testing",
+      "ttl_seconds": 3600,
+      "created_at": "2026-07-04T21:49:49.471916",
+      "last_seen": "2026-07-04T21:49:49.471916",
+      "expires_at": "2026-07-04T22:49:49.471916"
+    },
+    "ab0d6b51-ad8b-4af4-99a0-187a857b1c5e": {
+      "lease_id": "ab0d6b51-ad8b-4af4-99a0-187a857b1c5e",
+      "client_id": "test-client",
+      "purpose": "testing",
+      "ttl_seconds": 3600,
+      "created_at": "2026-07-04T21:49:49.518998",
+      "last_seen": "2026-07-04T21:49:49.524636",
+      "expires_at": "2026-07-04T22:49:49.524636"
+    },
+    "369c4107-1a84-4b0c-8476-02e022723515": {
+      "lease_id": "369c4107-1a84-4b0c-8476-02e022723515",
+      "client_id": "test-client",
+      "purpose": "testing",
+      "ttl_seconds": 7200,
+      "created_at": "2026-07-04T21:49:49.526995",
+      "last_seen": "2026-07-04T21:49:49.529988",
+      "expires_at": "2026-07-04T23:49:49.529988"
+    }
+  }
 }

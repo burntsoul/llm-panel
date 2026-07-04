@@ -43,6 +43,7 @@ from models import (
     get_model_display_entries,
     get_models_openai_format,
     get_model_table_status,
+    get_ollama_provider_model_status,
     get_embedding_models_openai_format,
     get_cached_embeddings,
     cache_embeddings,
@@ -55,6 +56,10 @@ from models import (
     rewrite_model_ids,
     upsert_model_profile,
     profile_backing_model_name,
+    set_model_alias,
+    delete_model_alias,
+    get_all_model_aliases,
+    _load_meta,
 )
 import llama_cpp_provider
 from lease_api import router as lease_api_router
@@ -1315,6 +1320,7 @@ def api_settings_effective():
             "provider_ollama": {
                 "title": "Ollama provider",
                 "custom": "provider_ollama",
+                "custom_endpoint": "/api/providers/ollama/aliases",
                 "fields": [],
             },
             "provider_llama_cpp": {
@@ -1531,7 +1537,7 @@ def _refresh_ollama_model_state() -> list[dict]:
     invalidate_model_cache()
     sync_model_meta_with_ollama()
     invalidate_model_cache()
-    return get_model_table_status()
+    return get_ollama_provider_model_status()
 
 
 def _ollama_error_message(response: requests.Response) -> str:
@@ -1615,7 +1621,7 @@ def _profile_response() -> dict:
     return {
         "ok": True,
         "profiles": get_model_profiles(),
-        "models": get_model_table_status(),
+        "models": get_ollama_provider_model_status(),
     }
 
 
@@ -1822,6 +1828,119 @@ async def api_ollama_delete_profile(public_model: str):
     delete_model_profile(public_model)
     invalidate_model_cache()
     return _profile_response()
+
+
+# ============================================================================
+# Model Alias Management Endpoints
+# ============================================================================
+
+@app.get("/api/providers/ollama/aliases")
+async def api_ollama_aliases():
+    """
+    Return all configured model aliases.
+    Returns: { "aliases": { "model_name": "alias_name", ... } }
+    """
+    aliases = get_all_model_aliases()
+    return {"provider": "ollama", "aliases": aliases}
+
+
+@app.get("/api/providers/ollama/aliases/{model_name:path}")
+async def api_ollama_get_alias(model_name: str):
+    """
+    Return the alias for a specific model.
+    Returns: { "model_name": "...", "alias": "..." or null }
+    """
+    model_name = str(model_name or "").strip()
+    meta = _load_meta()
+    current = meta.get(model_name, {})
+    alias = current.get("alias")
+    return {
+        "model_name": model_name,
+        "alias": alias if alias else None,
+    }
+
+
+@app.put("/api/providers/ollama/aliases/{model_name:path}")
+async def api_ollama_set_alias(model_name: str, request: Request):
+    """
+    Set (or update) the alias for a model.
+    Body: { "alias": "My Alias" }
+    Pass empty string to remove the alias.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail={"error": "invalid JSON body"})
+
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail={"error": "body must be a JSON object"})
+
+    model_name = str(model_name or "").strip()
+    alias = body.get("alias")
+
+    if not model_name:
+        raise HTTPException(status_code=400, detail={"error": "model_name is required"})
+
+    if alias is None:
+        # Deleting the alias
+        result = delete_model_alias(model_name)
+        if result is None:
+            raise HTTPException(status_code=404, detail={"error": f"model '{model_name}' not found"})
+        invalidate_model_cache()
+        return {
+            "ok": True,
+            "model_name": model_name,
+            "alias": None,
+            "message": f"Alias removed for '{model_name}'",
+        }
+
+    if not isinstance(alias, str):
+        raise HTTPException(status_code=400, detail={"error": "alias must be a string"})
+
+    alias_stripped = alias.strip()
+    if not alias_stripped:
+        # Empty alias means remove
+        result = delete_model_alias(model_name)
+        if result is None:
+            raise HTTPException(status_code=404, detail={"error": f"model '{model_name}' not found"})
+        invalidate_model_cache()
+        return {
+            "ok": True,
+            "model_name": model_name,
+            "alias": None,
+            "message": f"Alias removed for '{model_name}'",
+        }
+
+    result = set_model_alias(model_name, alias_stripped)
+    invalidate_model_cache()
+    return {
+        "ok": True,
+        "model_name": model_name,
+        "alias": result.get("alias"),
+        "message": f"Alias set for '{model_name}'",
+    }
+
+
+@app.delete("/api/providers/ollama/aliases/{model_name:path}")
+async def api_ollama_delete_alias(model_name: str):
+    """
+    Remove the alias for a model.
+    """
+    model_name = str(model_name or "").strip()
+
+    if not model_name:
+        raise HTTPException(status_code=400, detail={"error": "model_name is required"})
+
+    result = delete_model_alias(model_name)
+    if result is None:
+        raise HTTPException(status_code=404, detail={"error": f"model '{model_name}' not found"})
+    invalidate_model_cache()
+    return {
+        "ok": True,
+        "model_name": model_name,
+        "alias": None,
+        "message": f"Alias removed for '{model_name}'",
+    }
 
 
 def _llama_cpp_profile_payload() -> dict:
@@ -2051,12 +2170,17 @@ async def api_llama_cpp_restart_profile(profile_id: str):
     return {**_llama_cpp_profile_payload(), "profile": profile}
 
 
+def _clamp_llama_cpp_log_lines(lines: int) -> int:
+    return max(50, min(2000, int(lines)))
+
+
 @app.get("/api/providers/llama-cpp/profiles/{profile_id}/logs")
-async def api_llama_cpp_profile_logs(profile_id: str):
+async def api_llama_cpp_profile_logs(profile_id: str, lines: int = 500):
+    lines = _clamp_llama_cpp_log_lines(lines)
     try:
         logs = await asyncio.get_running_loop().run_in_executor(
             None,
-            lambda: llama_cpp_provider.get_profile_logs(profile_id),
+            lambda: llama_cpp_provider.get_profile_logs(profile_id, lines),
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail={"error": str(exc)})

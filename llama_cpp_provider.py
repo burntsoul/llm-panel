@@ -817,7 +817,7 @@ def restart_profile(profile_id: str) -> Dict[str, Any]:
     return start_profile(profile_id)
 
 
-def get_profile_logs(profile_id: str, lines: int = 200) -> str:
+def get_profile_logs(profile_id: str, lines: int = 500) -> str:
     profile = find_profile(profile_id)
     if not profile:
         raise ValueError("profile not found")

@@ -108,15 +108,28 @@ def get_profile_for_model(public_model: str) -> Optional[Dict[str, Any]]:
 
 
 def resolve_model_for_upstream(public_model: str) -> str:
-    profile = get_profile_for_model(public_model)
+    """
+    Map a public-facing name (alias or raw model name) to the actual model
+    name used for upstream API calls (Ollama / llama.cpp).
+
+    Resolution order:
+      1. Map alias -> raw model name
+      2. Check for profile and resolve to backing model if active
+      3. Return the resolved model name
+    """
+    # Step 1: If public_model is an alias, resolve to raw model name
+    raw_name = public_name_to_raw_model(public_model)
+
+    # Step 2: Check if the resolved model has a profile
+    profile = get_profile_for_model(raw_name)
     if not profile:
-        return public_model
+        return raw_name
     backing = profile.get("backing_model")
     if not backing:
-        return public_model
+        return raw_name
     live_set = _live_model_name_set()
     if live_set is not None and backing not in live_set:
-        return public_model
+        return raw_name
     return backing
 
 
@@ -256,6 +269,97 @@ def _invalidate_model_meta_cache() -> None:
     """Tyhjennä model_meta-välimuisti niin että seuraava _load_meta() lukee tiedostosta."""
     global _model_meta_cache
     _model_meta_cache = None
+
+
+# ============================================================================
+# Model Aliases
+# ============================================================================
+
+def get_model_alias(model_name: str) -> str:
+    """
+    Return the configured alias for a model.
+    If no alias is configured, returns the raw model name as default.
+    """
+    meta = _load_meta().get(model_name, {})
+    alias = meta.get("alias")
+    if alias and str(alias).strip():
+        return str(alias).strip()
+    return model_name
+
+
+def set_model_alias(model_name: str, alias: Optional[str]) -> Dict[str, Any]:
+    """
+    Set (or clear) the alias for a model.
+    If alias is None or empty string, the alias key is removed.
+    Returns the updated meta dict for the model.
+    """
+    meta = _load_meta().copy()
+    current = meta.get(model_name, {}).copy()
+    alias = str(alias).strip() if alias is not None else ""
+    if alias:
+        current["alias"] = alias
+    elif "alias" in current:
+        del current["alias"]
+    meta[model_name] = current
+    _write_meta(meta)
+    return current
+
+
+def delete_model_alias(model_name: str) -> Optional[Dict[str, Any]]:
+    """Remove the alias for a model. Returns the updated meta or None."""
+    meta = _load_meta().copy()
+    current = meta.get(model_name)
+    if not current:
+        return None
+    current = current.copy()
+    if "alias" in current:
+        del current["alias"]
+        meta[model_name] = current
+        _write_meta(meta)
+    return current
+
+
+def get_all_model_aliases() -> Dict[str, str]:
+    """
+    Return a mapping of {model_name: alias} for all models that have an alias configured.
+    """
+    meta = _load_meta()
+    result = {}
+    for model_name, values in meta.items():
+        if is_profile_backing_model(model_name):
+            continue
+        alias = values.get("alias")
+        if alias and str(alias).strip():
+            result[model_name] = str(alias).strip()
+    return result
+
+
+def display_name_for_model(model_name: str) -> str:
+    """
+    Return the display name for a model: the alias if configured, otherwise the raw name.
+    This is the name that should be shown to users and exposed downstream.
+    """
+    return get_model_alias(model_name)
+
+
+def public_name_to_raw_model(public_name: str) -> str:
+    """
+    Map a public-facing name (alias or raw model name) back to the raw Ollama model name.
+    If public_name matches an alias, return the corresponding raw model name.
+    Otherwise return public_name as-is (it's already the raw model name).
+    """
+    aliases = get_all_model_aliases()
+    # Build reverse lookup: alias -> model_name
+    reverse = {}
+    for model_name, alias in aliases.items():
+        reverse[alias] = model_name
+    if public_name in reverse:
+        return reverse[public_name]
+    # Also check if public_name is the display name (alias or raw) for any model
+    for model_name in _load_meta():
+        if display_name_for_model(model_name) == public_name:
+            return model_name
+    return public_name
 
 
 def invalidate_model_cache() -> None:
@@ -408,6 +512,77 @@ def get_model_names() -> List[str]:
     return names
 
 
+def get_ollama_provider_model_status() -> List[Dict[str, Any]]:
+    """
+    Return raw Ollama model rows for provider management.
+
+    Public model lists may expose aliases, but settings controls need the
+    actual Ollama model names so destructive actions and profile edits target
+    the real upstream model.
+    """
+    raw = _get_raw_models()
+    meta_map = _load_meta()
+    now_models = _fetch_from_ollama()
+    if now_models is None:
+        now_set = None
+    else:
+        now_set = {m.get("name") for m in now_models if m.get("name")}
+
+    rows: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def build_row(name: str, meta: Dict[str, Any]) -> Dict[str, Any]:
+        source = meta.get("source", "local")
+        device = meta.get("device", "cpu")
+        profile = _profile_meta(meta)
+        badge = _badge_for_meta(source, device)
+        if profile["enabled"]:
+            badge = f"profile {badge}"
+
+        if now_set is None:
+            present = None
+            base_present = None
+            backing_present = None
+        else:
+            base_present = name in now_set
+            backing = profile.get("backing_model")
+            backing_present = bool(backing and backing in now_set)
+            present = bool(base_present or backing_present)
+
+        alias = meta.get("alias")
+        alias = str(alias).strip() if alias and str(alias).strip() else ""
+        return {
+            "id": name,
+            "label": f"{name} ({badge})",
+            "source": source,
+            "device": device,
+            "provider": "ollama",
+            "profile": profile if profile["enabled"] else None,
+            "present_now": present,
+            "base_present_now": base_present,
+            "backing_present": backing_present,
+            "alias": alias,
+            "display_id": alias or name,
+        }
+
+    for model in raw:
+        name = model.get("name")
+        if not name or is_profile_backing_model(name):
+            continue
+        seen.add(name)
+        rows.append(build_row(name, meta_map.get(name, {})))
+
+    for name, meta in meta_map.items():
+        if name in seen or is_profile_backing_model(name):
+            continue
+        profile = _profile_meta(meta)
+        if not profile["enabled"]:
+            continue
+        rows.append(build_row(name, meta))
+
+    return rows
+
+
 def _badge_for_meta(source: str, device: str) -> str:
     """
     Rakentaa pienen 'badgen' meta-tietojen perusteella.
@@ -425,17 +600,11 @@ def _badge_for_meta(source: str, device: str) -> str:
 
 def get_model_display_entries() -> List[Dict[str, Any]]:
     """
-    Palauttaa listan sanakirjoja llm-panelin UI:lle:
+    Palauttaa listan sanakirjoja llm-panelin UI:lle.
 
-    [
-      {
-        "id": "deepseek-coder:6.7b",
-        "label": "deepseek-coder:6.7b (💻 CPU-local)",
-        "source": "local",
-        "device": "cpu",
-      },
-      ...
-    ]
+    Jos mallilla on alias määritetty, nayttokentassa kaytetaan aliasia.
+    "id"-kentassa on kaytettava nimi (alias tai raaka nimi), ja
+    "raw_model_name"-kentassa on todellinen Ollama-mallinimi.
     """
     raw = _get_raw_models()
     meta_map = _load_meta()
@@ -459,17 +628,24 @@ def get_model_display_entries() -> List[Dict[str, Any]]:
         badge = _badge_for_meta(source, device)
         if profile["enabled"]:
             badge = f"profile {badge}"
-        label = f"{name} ({badge})"
 
-        entries.append(
-            {
-                "id": name,
-                "label": label,
-                "source": source,
-                "device": device,
-                "profile": profile if profile["enabled"] else None,
-            }
-        )
+        display_name = display_name_for_model(name)
+        has_custom_alias = "alias" in meta and meta["alias"]
+        if has_custom_alias:
+            label = f"{display_name} ({badge})"
+        else:
+            label = f"{name} ({badge})"
+
+        entry: Dict[str, Any] = {
+            "id": display_name,
+            "label": label,
+            "source": source,
+            "device": device,
+            "profile": profile if profile["enabled"] else None,
+        }
+        if has_custom_alias:
+            entry["raw_model_name"] = name
+        entries.append(entry)
 
     for name, meta in meta_map.items():
         if name in seen or is_profile_backing_model(name):
@@ -480,15 +656,17 @@ def get_model_display_entries() -> List[Dict[str, Any]]:
         source = meta.get("source", "local")
         device = meta.get("device", "cpu")
         badge = f"profile {_badge_for_meta(source, device)}"
-        entries.append(
-            {
-                "id": name,
-                "label": f"{name} ({badge})",
-                "source": source,
-                "device": device,
-                "profile": profile,
-            }
-        )
+        display_name = display_name_for_model(name)
+        entry: Dict[str, Any] = {
+            "id": display_name,
+            "label": f"{display_name} ({badge})",
+            "source": source,
+            "device": device,
+            "profile": profile,
+        }
+        if "alias" in meta and meta["alias"]:
+            entry["raw_model_name"] = name
+        entries.append(entry)
 
     for profile in llama_cpp_provider.list_profiles():
         served = str(profile.get("served_model_id") or "").strip()
@@ -541,7 +719,12 @@ def get_models_openai_format() -> List[Dict[str, Any]]:
     Palauttaa mallilistan OpenAI-yhteensopivassa muodossa
     /v1/models -endpointtia varten.
 
-    Mukaan lisätään myös "metadata": { source, device } ja "description".
+    Jos mallilla on alias määritetty, alias kaytetään "id"-kentassa
+    jotta alustat kuten Open WebUI nayttavat alias-nimen.
+    Ilman aliasia kaytetaan raakaa mallinimea.
+
+    Metadata-sanakirjassa on "raw_model_name"-kentta joka sisaltaa
+    todellisen Ollama-mallinimen proxytymista varten.
     """
     result: List[Dict[str, Any]] = []
     raw = _get_raw_models()
@@ -563,53 +746,67 @@ def get_models_openai_format() -> List[Dict[str, Any]]:
         badge = _badge_for_meta(source, device)
         if profile["enabled"]:
             badge = f"profile {badge}"
-        desc = f"{name} [{badge}]"
 
-        result.append(
-            {
-                "id": name,
-                "object": "model",
-                "created": base_ts + idx,
-                "owned_by": "llm-server",
-                "metadata": {
-                    "source": source,
-                    "device": device,
-                    "profile": profile if profile["enabled"] else None,
-                },
-                "description": desc,
-            }
-        )
+        # Alias-kayttaja nayttama nimi: jos alias on määritetty, kayta sitä,
+        # muuten kayta raakaa mallinimea.
+        display_name = display_name_for_model(name)
+        has_custom_alias = "alias" in meta and meta["alias"]
+        if has_custom_alias:
+            desc = f"{display_name} [{badge}]"
+        else:
+            desc = f"{name} [{badge}]"
 
-    seen_names = {item["id"] for item in result}
+        entry: Dict[str, Any] = {
+            "id": display_name,
+            "object": "model",
+            "created": base_ts + idx,
+            "owned_by": "llm-server",
+            "metadata": {
+                "source": source,
+                "device": device,
+                "profile": profile if profile["enabled"] else None,
+            },
+            "description": desc,
+        }
+        # Tallenna raaka mallinimi metatietoon proxytymista varten.
+        if has_custom_alias:
+            entry["metadata"]["raw_model_name"] = name
+        result.append(entry)
+
+    seen_display_names: set[str] = {item["id"] for item in result}
     for name, meta in meta_map.items():
-        if name in seen_names or is_profile_backing_model(name):
+        display_name = display_name_for_model(name)
+        if display_name in seen_display_names or is_profile_backing_model(name):
             continue
+        seen_display_names.add(display_name)
         profile = _profile_meta(meta)
         if not profile["enabled"]:
             continue
         source = meta.get("source", "local")
         device = meta.get("device", "cpu")
         badge = f"profile {_badge_for_meta(source, device)}"
-        result.append(
-            {
-                "id": name,
-                "object": "model",
-                "created": base_ts + len(result),
-                "owned_by": "llm-server",
-                "metadata": {
-                    "source": source,
-                    "device": device,
-                    "profile": profile,
-                },
-                "description": f"{name} [{badge}]",
-            }
-        )
 
-    seen_names = {item["id"] for item in result}
+        entry: Dict[str, Any] = {
+            "id": display_name,
+            "object": "model",
+            "created": base_ts + len(result),
+            "owned_by": "llm-server",
+            "metadata": {
+                "source": source,
+                "device": device,
+                "profile": profile,
+            },
+            "description": f"{display_name} [{badge}]",
+        }
+        if "alias" in meta and meta["alias"]:
+            entry["metadata"]["raw_model_name"] = name
+        result.append(entry)
+
     for profile in llama_cpp_provider.list_profiles():
         served = str(profile.get("served_model_id") or "").strip()
-        if not served or served in seen_names:
+        if not served or served in seen_display_names:
             continue
+        seen_display_names.add(served)
         result.append(
             {
                 "id": served,
@@ -695,12 +892,13 @@ def get_model_table_status() -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for e in entries:
         mid = e["id"]
+        raw_mid = e.get("raw_model_name") or mid
         if now_set is None:
             present = None
             base_present = None
         else:
-            present = mid in now_set
-            base_present = mid in now_set
+            present = raw_mid in now_set
+            base_present = raw_mid in now_set
             profile = e.get("profile") or {}
             backing = profile.get("backing_model")
             if profile and backing in now_set:

@@ -40,11 +40,16 @@ let activeSettingsSection = "runtime";
 let settingsDirty = false;
 let settingsAdvanced = false;
 let ollamaProfiles = [];
+let ollamaProviderModels = [];
 let llamaCppSettings = null;
 let llamaCppProfiles = [];
 let llamaCppArtifacts = [];
 let llamaCppDownload = null;
 let llamaCppDownloadTimer = null;
+let llamaCppLogTimer = null;
+let llamaCppLogProfileId = null;
+let llamaCppLogPinned = true;
+let modalCleanup = null;
 let gpuStatusChart = null;
 let gpuStatusWindow = "15m";
 let gpuStatusTimer = null;
@@ -54,6 +59,19 @@ let gpuStatusVisibleSeries = {
   gpu_mem_util_percent: true,
   last_target_xx: true,
   last_applied_xx: true,
+};
+
+// Model alias state + UI refs
+let modelAliases = {};
+let aliasEditState = {};
+let aliasEls = {
+  tableBody: null,
+  addAliasModel: null,
+  addAliasInput: null,
+  addAliasBtn: null,
+  saveAliasBtn: null,
+  cancelAliasBtn: null,
+  status: null,
 };
 
 const GPU_STATUS_WINDOWS = ["5m", "15m", "1h", "6h", "24h"];
@@ -1510,8 +1528,9 @@ function renderOllamaProviderRows(rows) {
   const body = qs("#ollama-model-table-body");
   if (!body) return;
   body.innerHTML = "";
+  const safeRows = rows || [];
 
-  if (!rows || !rows.length) {
+  if (!safeRows.length) {
     const empty = document.createElement("div");
     empty.className = "provider-model-empty";
     empty.textContent = "No models reported by Ollama.";
@@ -1519,12 +1538,16 @@ function renderOllamaProviderRows(rows) {
     return;
   }
 
-  rows.forEach((row) => {
+  safeRows.forEach((row) => {
+    const modelId = row.raw_model_name || row.id || "";
     const item = document.createElement("div");
     item.className = "provider-model-row";
 
     const name = document.createElement("strong");
-    name.textContent = row.id || "";
+    name.textContent = modelId;
+    if (row.alias) {
+      name.title = `Exposed as ${row.alias}`;
+    }
 
     const meta = document.createElement("span");
     let status = "unknown";
@@ -1532,7 +1555,7 @@ function renderOllamaProviderRows(rows) {
     else if (row.present_now === false) status = "missing";
     meta.textContent = `${status} / ${row.source || "local"} / ${row.device || "unknown"}`;
 
-    const profile = profileForModel(row.id || "");
+    const profile = profileForModel(modelId);
     const profileMeta = document.createElement("span");
     profileMeta.textContent = profile ? `profile ${profile.status || "active"}` : "base";
 
@@ -1544,7 +1567,7 @@ function renderOllamaProviderRows(rows) {
     profileBtn.className = "secondary";
     profileBtn.dataset.ollamaAction = "profile";
     profileBtn.textContent = profile ? "Edit profile" : "Create profile";
-    profileBtn.addEventListener("click", () => openOllamaProfileEditor(row.id || ""));
+    profileBtn.addEventListener("click", () => openOllamaProfileEditor(modelId));
 
     const removeProfileBtn = document.createElement("button");
     removeProfileBtn.type = "button";
@@ -1553,7 +1576,7 @@ function renderOllamaProviderRows(rows) {
     removeProfileBtn.dataset.profileEnabled = profile ? "true" : "false";
     removeProfileBtn.textContent = "Remove profile";
     removeProfileBtn.disabled = !profile;
-    removeProfileBtn.addEventListener("click", () => removeOllamaProfile(row.id || ""));
+    removeProfileBtn.addEventListener("click", () => removeOllamaProfile(modelId));
 
     const removeBackingBtn = document.createElement("button");
     removeBackingBtn.type = "button";
@@ -1562,7 +1585,7 @@ function renderOllamaProviderRows(rows) {
     removeBackingBtn.dataset.backingPresent = profile && profile.backing_present === true ? "true" : "false";
     removeBackingBtn.textContent = "Remove backing";
     removeBackingBtn.disabled = !profile || profile.backing_present !== true;
-    removeBackingBtn.addEventListener("click", () => removeOllamaProfileBacking(row.id || ""));
+    removeBackingBtn.addEventListener("click", () => removeOllamaProfileBacking(modelId));
 
     const removeBtn = document.createElement("button");
     removeBtn.type = "button";
@@ -1571,7 +1594,7 @@ function renderOllamaProviderRows(rows) {
     removeBtn.dataset.ollamaRemove = "true";
     removeBtn.dataset.presentNow = row.base_present_now === true ? "true" : "false";
     removeBtn.disabled = row.base_present_now !== true;
-    removeBtn.addEventListener("click", () => removeOllamaModel(row.id || ""));
+    removeBtn.addEventListener("click", () => removeOllamaModel(modelId));
 
     actions.append(profileBtn, removeProfileBtn, removeBackingBtn, removeBtn);
     item.append(name, meta, profileMeta, actions);
@@ -1583,15 +1606,12 @@ async function refreshOllamaProviderModels(showLoading = true) {
   if (showLoading) setOllamaProviderStatus("Refreshing model inventory...");
 
   try {
-    const data = await getJson("/api/models");
-    try {
-      const profilesData = await getJson("/api/providers/ollama/profiles");
-      ollamaProfiles = profilesData.profiles || [];
-    } catch (_) {
-      ollamaProfiles = [];
-    }
-    renderOllamaProviderRows(data.models || []);
-    setOllamaProviderStatus(`Loaded ${(data.models || []).length} models.`, false);
+    const data = await getJson("/api/providers/ollama/models");
+    ollamaProfiles = data.profiles || [];
+    ollamaProviderModels = data.models || [];
+    renderOllamaProviderRows(ollamaProviderModels);
+    renderAliasTable();
+    setOllamaProviderStatus(`Loaded ${ollamaProviderModels.length} Ollama models.`, false);
   } catch (err) {
     setOllamaProviderStatus(`Model refresh failed: ${err}`, true);
   }
@@ -2142,7 +2162,8 @@ async function saveLlamaCppProfile(profileId = null) {
     closeModal();
     const saved = data.profile || {};
     const cacheState = saved.cache_enabled ? `cache on (${saved.cache_path || "no path"})` : "cache off";
-    setLlamaCppStatus(`${isEdit ? "Profile saved" : "Profile created"}: ${cacheState}.`);
+    const cacheRam = saved.cache_ram == null || saved.cache_ram === "" ? "default" : `${saved.cache_ram} MiB`;
+    setLlamaCppStatus(`${isEdit ? "Profile saved" : "Profile created"}: ${cacheState}, cache RAM ${cacheRam}.`);
   } catch (err) {
     if (status) status.textContent = `Save failed: ${err}`;
     setLlamaCppStatus(`Profile save failed: ${err}`, true);
@@ -2175,13 +2196,84 @@ async function deleteLlamaCppProfile(profileId) {
   }
 }
 
-async function showLlamaCppLogs(profileId) {
+function isLlamaCppLogPinned() {
+  const output = qs("#llama-cpp-log-output");
+  if (!output) return true;
+  return output.scrollHeight - output.scrollTop - output.clientHeight <= 48;
+}
+
+function setLlamaCppLogPinned(pinned) {
+  llamaCppLogPinned = !!pinned;
+  const status = qs("#llama-cpp-log-status");
+  const jump = qs("#llama-cpp-log-jump-btn");
+  if (status) status.textContent = llamaCppLogPinned ? "Live" : "Paused auto-scroll";
+  if (jump) jump.classList.toggle("hidden", llamaCppLogPinned);
+}
+
+function scrollLlamaCppLogsToLatest() {
+  const output = qs("#llama-cpp-log-output");
+  if (!output) return;
+  output.scrollTop = output.scrollHeight;
+  setLlamaCppLogPinned(true);
+}
+
+async function refreshLlamaCppLogs(manual = false) {
+  const profileId = llamaCppLogProfileId;
+  const output = qs("#llama-cpp-log-output");
+  const status = qs("#llama-cpp-log-status");
+  if (!profileId || !output) return;
+  const shouldPin = llamaCppLogPinned || isLlamaCppLogPinned();
+  if (manual && status) status.textContent = "Refreshing...";
   try {
-    const data = await getJson(`/api/providers/llama-cpp/profiles/${profileId}/logs`);
-    openModal("llama.cpp logs", `<pre class="log-tail">${escapeHtml(data.logs || "")}</pre>`);
+    const data = await getJson(`/api/providers/llama-cpp/profiles/${profileId}/logs?lines=500`);
+    const scrollTop = output.scrollTop;
+    output.textContent = data.logs || "";
+    if (shouldPin) {
+      scrollLlamaCppLogsToLatest();
+    } else {
+      output.scrollTop = scrollTop;
+      setLlamaCppLogPinned(false);
+    }
   } catch (err) {
+    if (status) status.textContent = `Refresh failed: ${err}`;
     setLlamaCppStatus(`Log read failed: ${err}`, true);
   }
+}
+
+function stopLlamaCppLogPolling() {
+  if (llamaCppLogTimer) {
+    window.clearInterval(llamaCppLogTimer);
+    llamaCppLogTimer = null;
+  }
+  llamaCppLogProfileId = null;
+}
+
+function showLlamaCppLogs(profileId) {
+  const body = `
+    <div class="llama-cpp-log-viewer">
+      <div class="llama-cpp-log-toolbar">
+        <span class="llama-cpp-log-status" id="llama-cpp-log-status">Loading...</span>
+        <div class="provider-action-row">
+          <button type="button" class="secondary" id="llama-cpp-log-refresh-btn">Refresh</button>
+          <button type="button" class="secondary hidden" id="llama-cpp-log-jump-btn">Jump to latest</button>
+        </div>
+      </div>
+      <pre class="log-tail llama-cpp-log-output" id="llama-cpp-log-output"></pre>
+    </div>`;
+  openModal("llama.cpp logs", body);
+  llamaCppLogProfileId = profileId;
+  setLlamaCppLogPinned(true);
+  setModalCleanup(stopLlamaCppLogPolling);
+
+  const output = qs("#llama-cpp-log-output");
+  const refresh = qs("#llama-cpp-log-refresh-btn");
+  const jump = qs("#llama-cpp-log-jump-btn");
+  if (output) output.addEventListener("scroll", () => setLlamaCppLogPinned(isLlamaCppLogPinned()));
+  if (refresh) refresh.addEventListener("click", () => refreshLlamaCppLogs(true));
+  if (jump) jump.addEventListener("click", scrollLlamaCppLogsToLatest);
+
+  refreshLlamaCppLogs();
+  llamaCppLogTimer = window.setInterval(() => refreshLlamaCppLogs(), 2000);
 }
 
 function renderLlamaCppArtifacts() {
@@ -2412,6 +2504,237 @@ function buildLlamaCppProviderSection() {
   syncLlamaCppDownloadPolling();
 }
 
+// ============================================================================
+// Model Alias Management UI
+// ============================================================================
+
+function renderAliasTable() {
+  const tableBody = aliasEls.tableBody;
+  if (!tableBody) return;
+  tableBody.innerHTML = "";
+
+  const allAliases = modelAliases;
+  const models = getAllModelNamesFromTable();
+
+  if (Object.keys(allAliases).length === 0 && models.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "provider-model-empty";
+    empty.textContent = "No models to assign aliases to.";
+    tableBody.appendChild(empty);
+    return;
+  }
+
+  const allModelNames = [...new Set([...models, ...Object.keys(allAliases)])];
+  allModelNames.forEach((modelName) => {
+    const currentAlias = allAliases[modelName] || "";
+    const isEditing = !!aliasEditState[modelName];
+
+    const row = document.createElement("div");
+    row.className = "provider-model-row";
+
+    const nameSpan = document.createElement("strong");
+    nameSpan.textContent = modelName;
+
+    const aliasSpan = document.createElement("span");
+    aliasSpan.className = "model-alias-display";
+    aliasSpan.textContent = currentAlias || "—";
+
+    const actions = document.createElement("div");
+    actions.className = "provider-action-row";
+
+    if (isEditing) {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.placeholder = "Enter alias...";
+      input.value = currentAlias;
+      input.className = "alias-edit-input";
+      input.style.width = "100%";
+      input.style.marginBottom = "4px";
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") saveAlias(modelName, input.value);
+        if (e.key === "Escape") cancelAliasEdit(modelName);
+      });
+
+      const saveBtn = document.createElement("button");
+      saveBtn.type = "button";
+      saveBtn.className = "primary";
+      saveBtn.textContent = "Save";
+      saveBtn.addEventListener("click", () => saveAlias(modelName, input.value));
+
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "secondary";
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.addEventListener("click", () => cancelAliasEdit(modelName));
+
+      actions.append(input, saveBtn, cancelBtn);
+      row.append(nameSpan, aliasSpan, actions);
+      tableBody.appendChild(row);
+
+      setTimeout(() => input.focus(), 0);
+    } else {
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "secondary";
+      editBtn.textContent = currentAlias ? "Edit alias" : "Set alias";
+      editBtn.addEventListener("click", () => startAliasEdit(modelName));
+
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = currentAlias ? "danger" : "secondary";
+      removeBtn.textContent = currentAlias ? "Remove alias" : "Set alias";
+      removeBtn.disabled = !currentAlias;
+      removeBtn.addEventListener("click", () => removeAlias(modelName));
+
+      actions.append(editBtn, removeBtn);
+      row.append(nameSpan, aliasSpan, actions);
+      tableBody.appendChild(row);
+    }
+  });
+}
+
+function getAllModelNamesFromTable() {
+  const fromProviderState = (ollamaProviderModels || [])
+    .map((row) => row.raw_model_name || row.id || "")
+    .map((name) => name.trim())
+    .filter(Boolean);
+  if (fromProviderState.length) return [...new Set(fromProviderState)];
+
+  const result = [];
+  const rows = qsa("#ollama-model-table-body .provider-model-row strong");
+  rows.forEach((el) => {
+    const name = el.textContent?.trim();
+    if (name) result.push(name);
+  });
+  return result;
+}
+
+function startAliasEdit(modelName) {
+  aliasEditState[modelName] = true;
+  renderAliasTable();
+}
+
+function cancelAliasEdit(modelName) {
+  delete aliasEditState[modelName];
+  renderAliasTable();
+}
+
+async function saveAlias(modelName, alias) {
+  const aliasClean = (alias || "").trim();
+  if (!modelName) return;
+
+  setAliasStatus("Saving alias...");
+
+  try {
+    const resp = await fetch(`/api/providers/ollama/aliases/${encodeURIComponent(modelName)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ alias: aliasClean }),
+    });
+
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      const detail = data?.detail || `HTTP ${resp.status}`;
+      throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    }
+
+    const data = await resp.json();
+    if (data.alias) modelAliases[data.model_name] = data.alias;
+    else delete modelAliases[data.model_name];
+    delete aliasEditState[modelName];
+    renderAliasTable();
+    setAliasStatus(data.message || "Alias saved.", false);
+  } catch (err) {
+    setAliasStatus(`Save failed: ${err}`, true);
+  }
+}
+
+async function removeAlias(modelName) {
+  if (!window.confirm(`Remove alias for "${modelName}"?`)) return;
+
+  setAliasStatus("Removing alias...");
+
+  try {
+    const resp = await fetch(`/api/providers/ollama/aliases/${encodeURIComponent(modelName)}`, {
+      method: "DELETE",
+    });
+
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      const detail = data?.detail || `HTTP ${resp.status}`;
+      throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    }
+
+    const data = await resp.json();
+    delete modelAliases[modelName];
+    delete aliasEditState[modelName];
+    renderAliasTable();
+    setAliasStatus(data.message || "Alias removed.", false);
+  } catch (err) {
+    setAliasStatus(`Remove failed: ${err}`, true);
+  }
+}
+
+async function loadAliases() {
+  try {
+    const data = await getJson("/api/providers/ollama/aliases");
+    modelAliases = data.aliases || {};
+  } catch (_) {
+    modelAliases = {};
+  }
+  renderAliasTable();
+}
+
+function setAliasStatus(message, isError = false) {
+  const node = qs("#alias-provider-status");
+  if (!node) return;
+  node.textContent = message;
+  node.classList.toggle("status-error", !!isError);
+  node.classList.toggle("status-ok-text", !isError && message && message !== "Saving alias...");
+}
+
+function buildAliasSection() {
+  const grid = qs("#settings-field-grid");
+  if (!grid) return;
+  grid.classList.remove("gpu-status-grid");
+  grid.classList.add("provider-grid");
+
+  const panel = document.createElement("div");
+  panel.className = "provider-panel";
+
+  const desc = document.createElement("p");
+  desc.className = "settings-save-status muted";
+  desc.style.marginBottom = "12px";
+  desc.textContent = "Assign human-readable aliases to models. Aliases are exposed downstream via the OpenAI-compatible endpoint and shown in UI like Open WebUI.";
+  panel.appendChild(desc);
+
+  const table = document.createElement("div");
+  table.className = "provider-model-table";
+  const head = document.createElement("div");
+  head.className = "provider-model-row provider-model-head";
+  ["Model", "Alias", "Actions"].forEach((text) => {
+    const node = document.createElement("span");
+    node.textContent = text;
+    head.appendChild(node);
+  });
+  const body = document.createElement("div");
+  body.id = "alias-model-table-body";
+  table.append(head, body);
+
+  const status = document.createElement("p");
+  status.className = "settings-save-status muted";
+  status.id = "alias-provider-status";
+  status.textContent = "Loading aliases...";
+
+  panel.append(table, status);
+  grid.appendChild(panel);
+
+  // Wire up refs
+  aliasEls.tableBody = qs("#alias-model-table-body");
+
+  loadAliases();
+}
+
 function buildOllamaProviderSection() {
   const grid = qs("#settings-field-grid");
   if (!grid) return;
@@ -2528,6 +2851,7 @@ function renderSettingsSection(sectionId) {
 
   if (section.custom === "provider_ollama") {
     buildOllamaProviderSection();
+    buildAliasSection();
     const table = qs("#settings-effective-table");
     if (table) table.innerHTML = "";
     const effectiveWrap = qs("#settings-effective-wrap");
@@ -2805,7 +3129,23 @@ function initModal() {
   }
 }
 
+function runModalCleanup() {
+  if (!modalCleanup) return;
+  const cleanup = modalCleanup;
+  modalCleanup = null;
+  try {
+    cleanup();
+  } catch (_) {
+    // Modal cleanup must never block opening or closing another modal.
+  }
+}
+
+function setModalCleanup(cleanup) {
+  modalCleanup = typeof cleanup === "function" ? cleanup : null;
+}
+
 function openModal(title, bodyHtml) {
+  runModalCleanup();
   const overlay = qs("#modal-overlay");
   const modalTitle = qs("#modal-title");
   const modalBody = qs("#modal-body");
@@ -2816,6 +3156,7 @@ function openModal(title, bodyHtml) {
 }
 
 function closeModal() {
+  runModalCleanup();
   const overlay = qs("#modal-overlay");
   if (overlay) overlay.style.display = "none";
 }

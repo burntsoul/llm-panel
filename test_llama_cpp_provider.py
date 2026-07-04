@@ -133,6 +133,28 @@ class TestLlamaCppProvider(unittest.TestCase):
 
         self.assertFalse(disabled["cache_enabled"])
 
+    def test_profile_update_changes_prompt_cache_ram(self):
+        profile = llama_cpp_provider.upsert_profile(
+            {
+                "served_model_id": "qwen-local:planner",
+                "gguf_path": "/models/llama/qwen.gguf",
+                "cache_enabled": True,
+                "cache_ram": 8192,
+            }
+        )
+
+        updated = llama_cpp_provider.upsert_profile(
+            {
+                "served_model_id": "qwen-local:planner",
+                "gguf_path": "/models/llama/qwen.gguf",
+                "cache_enabled": True,
+                "cache_ram": "16384",
+            },
+            profile_id=profile["id"],
+        )
+
+        self.assertEqual(updated["cache_ram"], 16384)
+
     def test_llama_cpp_routing_start_policy_keeps_running_profile_alive(self):
         self.assertFalse(app_module._should_start_llama_cpp_profile({"status": "running"}))
         self.assertTrue(app_module._should_start_llama_cpp_profile({"status": "stopped"}))
@@ -215,6 +237,26 @@ class TestLlamaCppProvider(unittest.TestCase):
         self.assertIn("hf-download.pid", command)
         self.assertIn("llama-server", command)
         self.assertIn("fuser -n tcp 8081", command)
+
+    @patch("llama_cpp_provider.run_ssh")
+    def test_get_profile_logs_uses_requested_tail_lines(self, run_ssh_mock):
+        profile = llama_cpp_provider.upsert_profile(
+            {
+                "served_model_id": "qwen-local:planner",
+                "gguf_path": "/models/llama/qwen.gguf",
+            }
+        )
+        run_ssh_mock.return_value = True, "log lines"
+
+        logs = llama_cpp_provider.get_profile_logs(profile["id"], lines=777)
+
+        self.assertEqual(logs, "log lines")
+        self.assertIn("tail -n 777", run_ssh_mock.call_args.args[0])
+
+    def test_api_llama_cpp_profile_log_lines_are_clamped(self):
+        self.assertEqual(app_module._clamp_llama_cpp_log_lines(5), 50)
+        self.assertEqual(app_module._clamp_llama_cpp_log_lines(500), 500)
+        self.assertEqual(app_module._clamp_llama_cpp_log_lines(5000), 2000)
 
     @patch("llama_cpp_provider.run_ssh")
     def test_start_profile_runs_runtime_cleanup_before_launch(self, run_ssh_mock):

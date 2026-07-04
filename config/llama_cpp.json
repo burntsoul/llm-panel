@@ -22,7 +22,7 @@
       "served_model_id": "Qwen3.6-35B-A3B-UD-Q8_K_XL-llama256k",
       "gguf_path": "/models/llama/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-UD-Q8_K_XL.gguf",
       "port": 8081,
-      "status": "running",
+      "status": "stopped",
       "ctx_size": 262144,
       "n_gpu_layers": 999,
       "main_gpu": 0,
@@ -38,7 +38,7 @@
       "cache_enabled": true,
       "cache_path": "/models/llama/.llm-agent-cache/Qwen3.6-35B-A3B-UD-Q8_K_XL-llama256k",
       "cache_mode": "rw",
-      "cache_ram": 8192,
+      "cache_ram": 16384,
       "cache_idle_slots": true,
       "cache_reuse": 0,
       "ctx_checkpoints": 32,
@@ -54,7 +54,7 @@
       "last_pid": "Warning: Permanently added '192.168.8.33' (ED25519) to the list of known hosts."
     }
   ],
-  "active_profile_id": "7079daadc716",
+  "active_profile_id": null,
   "download_job": {
     "id": "0010da35d46d",
     "repo_id": "unsloth/Qwen3.6-35B-A3B-GGUF",

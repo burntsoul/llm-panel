@@ -872,6 +872,41 @@ button:disabled {
   white-space: pre-wrap;
 }
 
+.llama-cpp-log-viewer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.llama-cpp-log-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.llama-cpp-log-status {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.llama-cpp-log-output {
+  height: 60vh;
+  max-height: 60vh;
+  min-height: 18rem;
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #111827;
+  color: #f8fafc;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
 .provider-model-table {
   border: 1px solid #e5d8c6;
   background: #fff8ee;
@@ -948,6 +983,27 @@ button:disabled {
   padding: 0.28rem 0.45rem;
   font-size: 0.76rem;
 }
+
+/* Alias table: 3-column layout */
+#alias-model-table-body .provider-model-row {
+  grid-template-columns: minmax(12rem, 1.2fr) minmax(10rem, 1fr) minmax(18rem, 1.4fr);
+}
+
+.model-alias-display {
+  font-style: italic;
+  color: var(--accent);
+}
+
+.alias-edit-input {
+  border: 1px solid #eadfce;
+  background: #fffdf8;
+  color: var(--ink);
+  padding: 0.35rem 0.45rem;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  min-width: 0;
+}
+
 
 .profile-form {
   display: flex;
