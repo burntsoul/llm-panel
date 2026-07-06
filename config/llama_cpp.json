@@ -22,14 +22,14 @@
       "served_model_id": "Qwen3.6-35B-A3B-UD-Q8_K_XL-llama256k",
       "gguf_path": "/models/llama/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-UD-Q8_K_XL.gguf",
       "port": 8081,
-      "status": "stopped",
+      "status": "running",
       "ctx_size": 262144,
       "n_gpu_layers": 999,
       "main_gpu": 0,
       "tensor_split": "",
       "split_mode": "",
       "flash_attn": false,
-      "threads": 12,
+      "threads": 14,
       "threads_batch": 12,
       "batch_size": 4096,
       "ubatch_size": 2048,
@@ -49,23 +49,28 @@
         "--cache-type-k",
         "f16",
         "--cache-type-v",
-        "f16"
+        "f16",
+        "--jinja",
+        "--reasoning-format",
+        "deepseek",
+        "-lv",
+        "4"
       ],
       "last_pid": "Warning: Permanently added '192.168.8.33' (ED25519) to the list of known hosts."
     }
   ],
-  "active_profile_id": null,
+  "active_profile_id": "7079daadc716",
   "download_job": {
-    "id": "0010da35d46d",
-    "repo_id": "unsloth/Qwen3.6-35B-A3B-GGUF",
-    "filename": "Qwen3.6-35B-A3B-UD-Q8_K_XL.gguf",
-    "target_dir": "/models/llama/Qwen3.6-35B-A3B-GGUF",
-    "target_path": "/models/llama/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-UD-Q8_K_XL.gguf",
+    "id": "395ab8d62521",
+    "repo_id": "MaziyarPanahi/Mixtral-8x22B-Instruct-v0.1-GGUF",
+    "filename": "Mixtral-8x22B-Instruct-v0.1.Q4_K_M-00001-of-00002.gguf",
+    "target_dir": "/models/llama/Mixtral-8x22B-Instruct-v0.1-GGUF",
+    "target_path": "/models/llama/Mixtral-8x22B-Instruct-v0.1-GGUF/Mixtral-8x22B-Instruct-v0.1.Q4_K_M-00001-of-00002.gguf",
     "pid_path": "/tmp/llm-agent-llama/hf-download.pid",
     "log_path": "/tmp/llm-agent-llama/hf-download.log",
-    "status": "completed",
-    "started_at": 1783113952.6301465,
+    "status": "error",
+    "started_at": 1783360493.5233026,
     "last_pid": "Warning: Permanently added '192.168.8.33' (ED25519) to the list of known hosts.",
-    "completed_at": 1783114636.3556077
+    "completed_at": 1783361165.552619
   }
 }

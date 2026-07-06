@@ -526,11 +526,15 @@ def upsert_profile(values: Dict[str, Any], profile_id: Optional[str] = None) -> 
 
     profiles = store["profiles"]
     existing = None
-    for profile in profiles:
+    existing_index = None
+    for index, profile in enumerate(profiles):
         if profile_id and profile.get("id") == profile_id:
             existing = profile
+            existing_index = index
         elif profile.get("served_model_id") == served:
             raise ValueError(f"served model id already exists: {served}")
+    if profile_id and existing is None:
+        raise KeyError("profile not found")
 
     runtime = _profile_runtime(values)
     if runtime.get("cache_enabled") and not runtime.get("cache_path"):
@@ -550,6 +554,8 @@ def upsert_profile(values: Dict[str, Any], profile_id: Optional[str] = None) -> 
     )
     if existing is None:
         profiles.append(profile)
+    elif existing_index is not None:
+        profiles[existing_index] = profile
     store["profiles"] = profiles
     _write_store(store)
     return profile

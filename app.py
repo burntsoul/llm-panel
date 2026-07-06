@@ -9,6 +9,7 @@ import httpx
 import time
 import base64
 import logging
+import re
 import subprocess
 
 from config import settings
@@ -2112,9 +2113,13 @@ async def api_llama_cpp_update_profile(profile_id: str, request: Request):
     body = await request.json()
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail={"error": "JSON object required"})
+    if not llama_cpp_provider.find_profile(profile_id):
+        raise HTTPException(status_code=404, detail={"error": "profile not found"})
     _check_llama_cpp_model_conflict(str(body.get("served_model_id") or ""), profile_id=profile_id)
     try:
         profile = llama_cpp_provider.upsert_profile(body, profile_id=profile_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail={"error": str(exc)})
     except Exception as exc:
         raise HTTPException(status_code=400, detail={"error": str(exc)})
     invalidate_model_cache()
@@ -2426,6 +2431,79 @@ def _annotate_llama_cpp_cached_tokens(payload: dict) -> dict:
     return payload
 
 
+THINKING_TAG_RE = re.compile(r"</?\s*(?:think|thinking)\s*>", re.IGNORECASE)
+THINKING_TAGS = ("<think>", "</think>", "<thinking>", "</thinking>")
+
+
+def _strip_thinking_tags(text: str) -> str:
+    return THINKING_TAG_RE.sub("", text)
+
+
+def _normalize_llama_cpp_response_content(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        return payload
+    choices = payload.get("choices")
+    if not isinstance(choices, list):
+        return payload
+    for choice in choices:
+        if not isinstance(choice, dict):
+            continue
+        for container_key in ("message", "delta"):
+            container = choice.get(container_key)
+            if not isinstance(container, dict):
+                continue
+            content = container.get("content")
+            if isinstance(content, str):
+                container["content"] = _strip_thinking_tags(content)
+        text = choice.get("text")
+        if isinstance(text, str):
+            choice["text"] = _strip_thinking_tags(text)
+    return payload
+
+
+class _ThinkingTagStreamNormalizer:
+    def __init__(self) -> None:
+        self._pending: dict[int, str] = {}
+
+    def filter_text(self, key: int, text: str) -> str:
+        output: list[str] = []
+        pending = self._pending.get(key, "")
+        for char in text:
+            if pending:
+                pending += char
+                lowered = pending.lower()
+                if lowered in THINKING_TAGS:
+                    pending = ""
+                elif any(tag.startswith(lowered) for tag in THINKING_TAGS):
+                    continue
+                else:
+                    output.append(pending)
+                    pending = ""
+            elif char == "<":
+                pending = char
+            else:
+                output.append(char)
+        self._pending[key] = pending
+        return "".join(output)
+
+    def normalize_payload(self, payload: dict) -> None:
+        choices = payload.get("choices")
+        if not isinstance(choices, list):
+            return
+        for position, choice in enumerate(choices):
+            if not isinstance(choice, dict):
+                continue
+            delta = choice.get("delta")
+            if not isinstance(delta, dict):
+                continue
+            content = delta.get("content")
+            if not isinstance(content, str):
+                continue
+            index = choice.get("index")
+            key = int(index) if isinstance(index, int) else position
+            delta["content"] = self.filter_text(key, content)
+
+
 def _rewrite_upstream_json(
     payload: dict,
     public_model: str | None,
@@ -2434,6 +2512,7 @@ def _rewrite_upstream_json(
 ) -> dict:
     if upstream_provider == "llama_cpp":
         payload = _annotate_llama_cpp_cached_tokens(payload)
+        payload = _normalize_llama_cpp_response_content(payload)
     if not public_model or not upstream_model:
         return payload
     return rewrite_model_ids(payload, public_model, upstream_model)
@@ -2444,6 +2523,7 @@ def _rewrite_sse_line(
     public_model: str | None,
     upstream_model: str | None,
     upstream_provider: str | None = None,
+    stream_normalizer: _ThinkingTagStreamNormalizer | None = None,
 ) -> bytes:
     if not line.strip().startswith(b"data:"):
         return line
@@ -2460,6 +2540,8 @@ def _rewrite_sse_line(
             line = line.replace(backing, public)
         return line
     if isinstance(payload, dict):
+        if upstream_provider == "llama_cpp" and stream_normalizer is not None:
+            stream_normalizer.normalize_payload(payload)
         payload = _rewrite_upstream_json(payload, public_model, upstream_model, upstream_provider)
         return prefix + b": " + json.dumps(payload).encode("utf-8")
     return line
@@ -2472,13 +2554,14 @@ async def _rewrite_upstream_sse_chunks(
     upstream_provider: str | None = None,
 ):
     buffer = b""
+    stream_normalizer = _ThinkingTagStreamNormalizer() if upstream_provider == "llama_cpp" else None
     async for chunk in byte_iter:
         buffer += chunk
         while b"\n" in buffer:
             line, buffer = buffer.split(b"\n", 1)
-            yield _rewrite_sse_line(line, public_model, upstream_model, upstream_provider) + b"\n"
+            yield _rewrite_sse_line(line, public_model, upstream_model, upstream_provider, stream_normalizer) + b"\n"
     if buffer:
-        yield _rewrite_sse_line(buffer, public_model, upstream_model, upstream_provider)
+        yield _rewrite_sse_line(buffer, public_model, upstream_model, upstream_provider, stream_normalizer)
 
 
 @app.get("/v1/models")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +9,14 @@ from unittest.mock import patch
 import app as app_module
 import llama_cpp_provider
 import models
+
+
+class JsonRequest:
+    def __init__(self, payload):
+        self.payload = payload
+
+    async def json(self):
+        return self.payload
 
 
 class TestLlamaCppProvider(unittest.TestCase):
@@ -155,6 +164,90 @@ class TestLlamaCppProvider(unittest.TestCase):
 
         self.assertEqual(updated["cache_ram"], 16384)
 
+    def test_profile_update_requires_existing_profile_id(self):
+        with self.assertRaises(KeyError):
+            llama_cpp_provider.upsert_profile(
+                {
+                    "served_model_id": "qwen-local:planner",
+                    "gguf_path": "/models/llama/qwen.gguf",
+                },
+                profile_id="missing-profile",
+            )
+
+        self.assertEqual(llama_cpp_provider.list_profiles(), [])
+
+    def test_profile_update_api_persists_to_existing_profile(self):
+        profile = llama_cpp_provider.upsert_profile(
+            {
+                "served_model_id": "qwen-local:planner",
+                "gguf_path": "/models/llama/qwen.gguf",
+                "ctx_size": 4096,
+                "cache_enabled": False,
+                "extra_args": ["--jinja"],
+            }
+        )
+        payload = {
+            "served_model_id": "qwen-local:planner-renamed",
+            "gguf_path": "/models/llama/qwen.gguf",
+            "port": 8099,
+            "ctx_size": 8192,
+            "cache_enabled": True,
+            "cache_path": "/models/llama/.llm-agent-cache/qwen-local-planner-renamed",
+            "cache_ram": 16384,
+            "extra_args": ["--jinja", "--reasoning-format", "deepseek"],
+        }
+
+        with patch("app.llama_cpp_provider.status_for_profile", side_effect=lambda p: p), patch(
+            "app.get_model_table_status",
+            return_value=[],
+        ):
+            response = asyncio.run(app_module.api_llama_cpp_update_profile(profile["id"], JsonRequest(payload)))
+
+        self.assertEqual(response["profile"]["id"], profile["id"])
+        saved = llama_cpp_provider.find_profile(profile["id"])
+        self.assertIsNotNone(saved)
+        self.assertEqual(saved["served_model_id"], "qwen-local:planner-renamed")
+        self.assertEqual(saved["port"], 8099)
+        self.assertEqual(saved["ctx_size"], 8192)
+        self.assertTrue(saved["cache_enabled"])
+        self.assertEqual(saved["cache_ram"], 16384)
+        self.assertEqual(saved["extra_args"], ["--jinja", "--reasoning-format", "deepseek"])
+        self.assertEqual(len(llama_cpp_provider.list_profiles()), 1)
+
+    def test_profile_update_api_rejects_missing_profile_id(self):
+        with patch("app.llama_cpp_provider.status_for_profile", side_effect=lambda p: p), patch(
+            "app.get_model_table_status",
+            return_value=[],
+        ):
+            with self.assertRaises(app_module.HTTPException) as ctx:
+                asyncio.run(
+                    app_module.api_llama_cpp_update_profile(
+                        "missing-profile",
+                        JsonRequest(
+                            {
+                                "served_model_id": "qwen-local:planner",
+                                "gguf_path": "/models/llama/qwen.gguf",
+                            }
+                        ),
+                    )
+                )
+
+        self.assertEqual(ctx.exception.status_code, 404)
+        self.assertEqual(llama_cpp_provider.list_profiles(), [])
+
+    def test_profile_update_api_rejects_non_object_payload(self):
+        profile = llama_cpp_provider.upsert_profile(
+            {
+                "served_model_id": "qwen-local:planner",
+                "gguf_path": "/models/llama/qwen.gguf",
+            }
+        )
+
+        with self.assertRaises(app_module.HTTPException) as ctx:
+            asyncio.run(app_module.api_llama_cpp_update_profile(profile["id"], JsonRequest([])))
+
+        self.assertEqual(ctx.exception.status_code, 400)
+
     def test_llama_cpp_routing_start_policy_keeps_running_profile_alive(self):
         self.assertFalse(app_module._should_start_llama_cpp_profile({"status": "running"}))
         self.assertTrue(app_module._should_start_llama_cpp_profile({"status": "stopped"}))
@@ -193,6 +286,70 @@ class TestLlamaCppProvider(unittest.TestCase):
         )
 
         self.assertEqual(rewritten["usage"]["prompt_tokens_details"]["cached_tokens"], 512)
+
+    def test_llama_cpp_response_strips_dangling_thinking_tags_from_content(self):
+        payload = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": (
+                            "I did not use a tool in my previous response.\n"
+                            "</thinking>\n\n"
+                            "Now let me create the tests:\n\n"
+                            "<write_to_file><path>tests/test_example.py</path></write_to_file>"
+                        ),
+                    }
+                }
+            ]
+        }
+
+        rewritten = app_module._rewrite_upstream_json(payload, "qwen-local:planner", "qwen-local:planner", "llama_cpp")
+
+        content = rewritten["choices"][0]["message"]["content"]
+        self.assertNotIn("</thinking>", content)
+        self.assertIn("<write_to_file>", content)
+
+    def test_llama_cpp_response_strips_think_tags_from_stream_delta(self):
+        line = (
+            b'data: {"choices":[{"delta":{"content":"<think>hidden</think>'
+            b'<write_to_file><path>x</path></write_to_file>"}}]}\n'
+        )
+
+        rewritten = app_module._rewrite_sse_line(line, "qwen-local:planner", "qwen-local:planner", "llama_cpp")
+
+        self.assertNotIn(b"<think>", rewritten)
+        self.assertNotIn(b"</think>", rewritten)
+        self.assertIn(b"<write_to_file>", rewritten)
+
+    def test_llama_cpp_response_strips_thinking_tags_split_across_stream_chunks(self):
+        async def chunks():
+            yield b'data: {"choices":[{"index":0,"delta":{"content":"</thi"}}]}\n'
+            yield b'data: {"choices":[{"index":0,"delta":{"content":"nking><write_to_file>"}}]}\n'
+
+        async def collect():
+            result = []
+            async for item in app_module._rewrite_upstream_sse_chunks(
+                chunks(),
+                "qwen-local:planner",
+                "qwen-local:planner",
+                "llama_cpp",
+            ):
+                result.append(item)
+            return b"".join(result)
+
+        rewritten = asyncio.run(collect())
+
+        self.assertNotIn(b"</thinking>", rewritten)
+        self.assertNotIn(b"</thi", rewritten)
+        self.assertIn(b"<write_to_file>", rewritten)
+
+    def test_llama_cpp_response_strips_thinking_tags_from_completion_text(self):
+        payload = {"choices": [{"text": "</thinking>\ndef foo():\n    pass\n"}]}
+
+        rewritten = app_module._rewrite_upstream_json(payload, "qwen-local:planner", "qwen-local:planner", "llama_cpp")
+
+        self.assertEqual(rewritten["choices"][0]["text"], "\ndef foo():\n    pass\n")
 
     @patch.object(app_module.settings, "ENFORCE_EXCLUSIVE_VMS", True)
     @patch("app.llama_cpp_provider.run_ssh", return_value=(True, "llm-agent-ssh-ok"))
