@@ -447,6 +447,112 @@ class TestGpuWatchdog(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(calls, [89])
 
+    async def test_deadband_holds_fan_target_near_setpoint(self):
+        patches = self._settings_patches()
+        for p in patches:
+            p.start()
+        self.addCleanup(lambda: [p.stop() for p in patches])
+
+        with (
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_SMOOTHING_ALPHA", 1.0),
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_DERIVATIVE_SMOOTHING_ALPHA", 1.0),
+            patch("gpu_watchdog.settings.WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS", 0.0),
+        ):
+            temps = {"value": 75.0}
+            now_value = {"t": 0.0}
+            calls = []
+
+            svc = GPUWatchdogService(
+                telemetry_getter=lambda: _telemetry_sample(temps["value"]),
+                fan_setter=lambda xx: calls.append(xx) or {"ok": True, "timestamp": "2026-01-01T00:00:01Z"},
+                vm_state_getter=lambda: "running",
+                monotonic_fn=lambda: now_value["t"],
+            )
+
+            await svc.step_once()
+
+            temps["value"] = 73.0
+            now_value["t"] = 3.0
+            await svc.step_once()
+
+            temps["value"] = 72.9
+            now_value["t"] = 6.0
+            await svc.step_once()
+
+            temps["value"] = 73.0
+            now_value["t"] = 9.0
+            await svc.step_once()
+
+        self.assertEqual(len(calls), 1)
+        self.assertGreater(calls[0], 40)
+
+    async def test_ramp_down_waits_for_multiple_below_target_samples(self):
+        patches = self._settings_patches()
+        for p in patches:
+            p.start()
+        self.addCleanup(lambda: [p.stop() for p in patches])
+
+        with (
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_SMOOTHING_ALPHA", 1.0),
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_DERIVATIVE_SMOOTHING_ALPHA", 1.0),
+            patch("gpu_watchdog.settings.WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS", 0.0),
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_MAX_STEP_DOWN_XX", 255),
+        ):
+            temps = {"value": 78.0}
+            now_value = {"t": 0.0}
+            calls = []
+
+            svc = GPUWatchdogService(
+                telemetry_getter=lambda: _telemetry_sample(temps["value"]),
+                fan_setter=lambda xx: calls.append(xx) or {"ok": True, "timestamp": "2026-01-01T00:00:01Z"},
+                vm_state_getter=lambda: "running",
+                monotonic_fn=lambda: now_value["t"],
+            )
+
+            await svc.step_once()
+
+            temps["value"] = 70.0
+            now_value["t"] = 3.0
+            await svc.step_once()
+            self.assertEqual(len(calls), 1)
+
+            now_value["t"] = 6.0
+            await svc.step_once()
+
+        self.assertEqual(len(calls), 2)
+        self.assertLess(calls[-1], calls[0])
+
+    async def test_ramp_up_is_not_blocked_by_stability_hysteresis(self):
+        patches = self._settings_patches()
+        for p in patches:
+            p.start()
+        self.addCleanup(lambda: [p.stop() for p in patches])
+
+        with (
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_SMOOTHING_ALPHA", 1.0),
+            patch("gpu_watchdog.settings.GPU_WATCHDOG_DERIVATIVE_SMOOTHING_ALPHA", 1.0),
+            patch("gpu_watchdog.settings.WATCHDOG_MIN_CHANGE_INTERVAL_SECONDS", 0.0),
+        ):
+            temps = {"value": 70.0}
+            now_value = {"t": 0.0}
+            calls = []
+
+            svc = GPUWatchdogService(
+                telemetry_getter=lambda: _telemetry_sample(temps["value"]),
+                fan_setter=lambda xx: calls.append(xx) or {"ok": True, "timestamp": "2026-01-01T00:00:01Z"},
+                vm_state_getter=lambda: "running",
+                monotonic_fn=lambda: now_value["t"],
+            )
+
+            await svc.step_once()
+
+            temps["value"] = 79.0
+            now_value["t"] = 3.0
+            await svc.step_once()
+
+        self.assertEqual(len(calls), 2)
+        self.assertGreater(calls[1], calls[0])
+
     async def test_max_step_down_limits_normal_decrease(self):
         patches = self._settings_patches()
         for p in patches:

@@ -126,6 +126,8 @@ class GPUWatchdogService:
         self._last_temp_sample_monotonic: Optional[float] = None
         self._desired_fan_xx: Optional[int] = None
         self._rate_limited_target_xx: Optional[int] = None
+        self._fan_raise_hold_until_monotonic: Optional[float] = None
+        self._below_target_sample_streak = 0
 
         self._config_error = self._validate_runtime_config()
         if self._config_error:
@@ -173,6 +175,8 @@ class GPUWatchdogService:
             self._last_temp_sample_monotonic = None
             self._desired_fan_xx = None
             self._rate_limited_target_xx = None
+            self._fan_raise_hold_until_monotonic = None
+            self._below_target_sample_streak = 0
         self._status_updated_at = _utc_now_iso()
 
     def _validate_runtime_config(self) -> Optional[str]:
@@ -316,6 +320,10 @@ class GPUWatchdogService:
             return max(desired_xx, self._last_applied_xx - step_xx)
         return desired_xx
 
+    def _reset_stability_state(self) -> None:
+        self._fan_raise_hold_until_monotonic = None
+        self._below_target_sample_streak = 0
+
     def _pi_target_for_temp(self, raw_temp_c: float) -> tuple[int, bool]:
         emergency = raw_temp_c >= self._emergency_temp_c
         if emergency:
@@ -324,6 +332,7 @@ class GPUWatchdogService:
             self._projected_error_c = self._pi_error_c
             self._control_error_c = max(self._pi_error_c, 0.0)
             self._cooldown_release_active = False
+            self._reset_stability_state()
             self._desired_fan_xx = int(_clamp(self._emergency_fan_xx, self._min_fan_xx, self._max_fan_xx))
             self._rate_limited_target_xx = self._desired_fan_xx
             return self._desired_fan_xx, True
@@ -370,6 +379,7 @@ class GPUWatchdogService:
             self._projected_error_c = self._projected_temp_c - self._target_temp_c
             self._control_error_c = 0.0
             self._pi_integral = 0.0
+            self._reset_stability_state()
             self._desired_fan_xx = self._min_fan_xx
             self._rate_limited_target_xx = self._rate_limit_target(self._desired_fan_xx)
             return self._rate_limited_target_xx, False
@@ -378,6 +388,16 @@ class GPUWatchdogService:
         self._projected_temp_c = self._smoothed_temp_c + (positive_rate * self._derivative_lookahead_seconds)
         self._projected_error_c = self._projected_temp_c - self._target_temp_c
         self._control_error_c = max(error, self._projected_error_c, 0.0)
+
+        below_target_sample = (
+            self._smoothed_temp_c <= (self._target_temp_c - 0.5)
+            and self._projected_error_c <= 0.0
+            and (self._temp_rate_c_per_s is None or self._temp_rate_c_per_s <= 0.05)
+        )
+        if below_target_sample:
+            self._below_target_sample_streak += 1
+        else:
+            self._below_target_sample_streak = 0
 
         over_target_error = max(error, 0.0)
         desired = (
@@ -388,6 +408,21 @@ class GPUWatchdogService:
         )
         self._desired_fan_xx = int(round(_clamp(desired, self._min_fan_xx, self._max_fan_xx)))
         self._rate_limited_target_xx = self._rate_limit_target(self._desired_fan_xx)
+
+        current_applied_xx = self._last_applied_xx
+        current_rate = self._temp_rate_c_per_s or 0.0
+        within_deadband = abs(error) <= 1.25 and abs(current_rate) <= 0.05
+        fan_raise_hold_active = bool(
+            self._fan_raise_hold_until_monotonic is not None and self._monotonic() < self._fan_raise_hold_until_monotonic
+        )
+
+        if current_applied_xx is not None:
+            if within_deadband and self._rate_limited_target_xx <= current_applied_xx:
+                self._rate_limited_target_xx = current_applied_xx
+            elif self._rate_limited_target_xx < current_applied_xx:
+                if fan_raise_hold_active or self._below_target_sample_streak < 2:
+                    self._rate_limited_target_xx = current_applied_xx
+
         return self._rate_limited_target_xx, False
 
     async def _apply_target_if_needed(self, target_xx: int, *, force: bool = False) -> None:
@@ -407,8 +442,13 @@ class GPUWatchdogService:
         self._last_command_at = cmd_result.get("timestamp") or _utc_now_iso()
 
         if self._last_command_ok:
+            previous_applied_xx = self._last_applied_xx if self._last_applied_xx is not None else self._min_fan_xx
             self._last_applied_xx = target_xx
             self._last_apply_monotonic = now
+            if previous_applied_xx is not None and target_xx > previous_applied_xx:
+                self._fan_raise_hold_until_monotonic = now + max(self._poll_seconds * 2.0, self._poll_seconds)
+            elif previous_applied_xx is not None and target_xx <= previous_applied_xx:
+                self._fan_raise_hold_until_monotonic = None
             if not self._log_transitions_only:
                 logger.info("GPU watchdog applied fan min xx=%s", target_xx)
             return
@@ -459,6 +499,7 @@ class GPUWatchdogService:
                 self._control_error_c = None
                 self._cooldown_release_active = False
                 self._last_temp_sample_monotonic = None
+                self._reset_stability_state()
                 await self._apply_target_if_needed(self._vm_off_fan_min_xx)
                 if self._last_transition_mode != self._mode:
                     logger.info("GPU watchdog mode transition: %s -> %s", self._last_transition_mode, self._mode)
@@ -504,6 +545,7 @@ class GPUWatchdogService:
                     self._mode_reason = f"{self._mode_reason}_vm_running"
                 elif vm_state is None:
                     self._mode_reason = f"{self._mode_reason}_vm_unknown"
+                self._reset_stability_state()
                 await self._apply_target_if_needed(self._failsafe_fan_min_xx)
             else:
                 if self._mode == MODE_FAILSAFE:
