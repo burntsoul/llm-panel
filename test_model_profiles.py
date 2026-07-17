@@ -139,6 +139,109 @@ class TestModelProfiles(unittest.TestCase):
         self.assertEqual(rows[0]["display_id"], "coding-planner")
         self.assertTrue(rows[0]["present_now"])
 
+    @patch("models.llama_cpp_provider.list_profiles", return_value=[])
+    @patch("models._get_ollama_show_contexts")
+    @patch("models._fetch_ollama_runtime_contexts", return_value={})
+    @patch("models._get_raw_models")
+    def test_openai_models_advertise_ollama_profile_context(
+        self, raw_mock, _runtime_mock, show_mock, _profiles_mock
+    ):
+        raw_mock.return_value = [{"name": "gemma4:12b", "digest": "abc"}]
+        self._write_meta(
+            {
+                "gemma4:12b": {
+                    "alias": "coding-planner",
+                    "profile_enabled": True,
+                    "profile_backing_model": models.profile_backing_model_name("gemma4:12b"),
+                    "profile_base_model": "gemma4:12b",
+                    "profile_parameters": {"num_ctx": 32768},
+                }
+            }
+        )
+
+        data = models.get_models_openai_format()
+
+        self.assertEqual(data[0]["id"], "coding-planner")
+        self.assertEqual(data[0]["context_length"], 32768)
+        self.assertEqual(data[0]["max_input_tokens"], 32768)
+        self.assertEqual(data[0]["n_ctx"], 32768)
+        show_mock.assert_not_called()
+
+    @patch("models.llama_cpp_provider.list_profiles", return_value=[])
+    @patch("models._get_ollama_show_contexts")
+    @patch("models._fetch_ollama_runtime_contexts")
+    @patch("models._get_raw_models")
+    def test_loaded_ollama_backing_context_overrides_profile(
+        self, raw_mock, runtime_mock, show_mock, _profiles_mock
+    ):
+        backing = models.profile_backing_model_name("gemma4:12b")
+        raw_mock.return_value = [{"name": "gemma4:12b", "digest": "abc"}]
+        runtime_mock.return_value = {backing: 65536}
+        self._write_meta(
+            {
+                "gemma4:12b": {
+                    "profile_enabled": True,
+                    "profile_backing_model": backing,
+                    "profile_base_model": "gemma4:12b",
+                    "profile_parameters": {"num_ctx": 32768},
+                }
+            }
+        )
+
+        data = models.get_models_openai_format()
+
+        self.assertEqual(data[0]["context_length"], 65536)
+        show_mock.assert_not_called()
+
+    @patch("models.llama_cpp_provider.list_profiles", return_value=[])
+    @patch("models._get_ollama_show_contexts", return_value={"plain:latest": 131072})
+    @patch("models._fetch_ollama_runtime_contexts", return_value={})
+    @patch("models._get_raw_models", return_value=[{"name": "plain:latest", "digest": "abc"}])
+    def test_openai_models_use_ollama_show_context_fallback(
+        self, _raw_mock, _runtime_mock, _show_mock, _profiles_mock
+    ):
+        data = models.get_models_openai_format()
+
+        self.assertEqual(data[0]["context_length"], 131072)
+        self.assertEqual(data[0]["max_input_tokens"], 131072)
+        self.assertEqual(data[0]["n_ctx"], 131072)
+
+    def test_ollama_show_context_prefers_num_ctx_and_rejects_invalid_values(self):
+        payload = {
+            "parameters": "temperature 0.7\nnum_ctx 8192",
+            "model_info": {
+                "general.architecture": "gemma3",
+                "gemma3.context_length": 131072,
+            },
+        }
+
+        self.assertEqual(models._parse_ollama_show_context(payload), 8192)
+        self.assertEqual(
+            models._parse_ollama_show_context(
+                {"model_info": {"general.architecture": "gemma3", "gemma3.context_length": 131072}}
+            ),
+            131072,
+        )
+        for value in (None, 0, -1, True, "invalid", 1.5):
+            self.assertIsNone(models._positive_int(value))
+
+    @patch("models.llm_server_up", return_value=True)
+    @patch("models._fetch_ollama_show_context", return_value=4096)
+    def test_ollama_show_context_is_cached_by_model_digest(self, fetch_mock, _up_mock):
+        rows = [{"name": "plain:latest", "digest": "abc"}]
+
+        first = models._get_ollama_show_contexts(rows)
+        second = models._get_ollama_show_contexts(rows)
+
+        self.assertEqual(first, {"plain:latest": 4096})
+        self.assertEqual(second, first)
+        fetch_mock.assert_called_once_with("plain:latest")
+
+    @patch("models.llm_server_up", return_value=True)
+    @patch("models.requests.get", side_effect=RuntimeError("offline"))
+    def test_ollama_runtime_context_failure_is_nonfatal(self, _get_mock, _up_mock):
+        self.assertEqual(models._fetch_ollama_runtime_contexts(), {})
+
 
 if __name__ == "__main__":
     unittest.main()

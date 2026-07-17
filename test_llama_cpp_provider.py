@@ -506,14 +506,84 @@ class TestLlamaCppProvider(unittest.TestCase):
             {
                 "served_model_id": "qwen-local:planner",
                 "gguf_path": "/models/llama/qwen.gguf",
+                "ctx_size": 32768,
             }
         )
 
-        with patch("models._get_raw_models", return_value=[]), patch("models._load_meta", return_value={}):
+        with patch("models._get_raw_models", return_value=[]), patch("models._load_meta", return_value={}), patch(
+            "models._get_ollama_contexts", return_value={}
+        ):
             data = models.get_models_openai_format()
 
-        ids = {item["id"] for item in data}
-        self.assertIn("qwen-local:planner", ids)
+        entry = next(item for item in data if item["id"] == "qwen-local:planner")
+        self.assertEqual(entry["context_length"], 32768)
+        self.assertEqual(entry["max_input_tokens"], 32768)
+        self.assertEqual(entry["n_ctx"], 32768)
+
+    def test_llama_cpp_runtime_context_overrides_profile(self):
+        profile = llama_cpp_provider.upsert_profile(
+            {
+                "served_model_id": "qwen-local:planner",
+                "gguf_path": "/models/llama/qwen.gguf",
+                "ctx_size": 32768,
+            }
+        )
+        response = unittest.mock.Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {"default_generation_settings": {"n_ctx": 65536}}
+
+        with patch("models._get_raw_models", return_value=[]), patch("models._load_meta", return_value={}), patch(
+            "models._get_ollama_contexts", return_value={}
+        ), patch("models.llama_cpp_provider.get_active_profile", return_value=profile), patch(
+            "models.requests.get", return_value=response
+        ):
+            data = models.get_models_openai_format()
+
+        entry = next(item for item in data if item["id"] == "qwen-local:planner")
+        self.assertEqual(entry["context_length"], 65536)
+
+    def test_llama_cpp_profile_context_is_per_slot_and_zero_is_omitted(self):
+        llama_cpp_provider.upsert_profile(
+            {
+                "served_model_id": "parallel-model",
+                "gguf_path": "/models/llama/parallel.gguf",
+                "ctx_size": 65536,
+                "parallel": 4,
+            }
+        )
+        llama_cpp_provider.upsert_profile(
+            {
+                "served_model_id": "auto-context-model",
+                "gguf_path": "/models/llama/auto.gguf",
+                "ctx_size": 0,
+            }
+        )
+
+        with patch("models._get_raw_models", return_value=[]), patch("models._load_meta", return_value={}), patch(
+            "models._get_ollama_contexts", return_value={}
+        ):
+            data = models.get_models_openai_format()
+
+        entries = {item["id"]: item for item in data}
+        self.assertEqual(entries["parallel-model"]["context_length"], 16384)
+        self.assertNotIn("context_length", entries["auto-context-model"])
+        self.assertNotIn("max_input_tokens", entries["auto-context-model"])
+        self.assertNotIn("n_ctx", entries["auto-context-model"])
+
+    def test_llama_cpp_props_failure_falls_back_to_profile(self):
+        profile = {
+            "id": "profile-1",
+            "served_model_id": "qwen-local:planner",
+            "port": 8081,
+            "ctx_size": 32768,
+            "parallel": 2,
+        }
+
+        with patch("models.requests.get", side_effect=RuntimeError("offline")):
+            runtime = models._fetch_llama_cpp_runtime_context(profile)
+
+        self.assertIsNone(runtime)
+        self.assertEqual(models._llama_cpp_profile_context(profile), 16384)
 
 
 if __name__ == "__main__":

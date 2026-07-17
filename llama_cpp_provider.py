@@ -499,6 +499,19 @@ def list_profiles() -> List[Dict[str, Any]]:
     return _load_store()["profiles"]
 
 
+def get_active_profile() -> Optional[Dict[str, Any]]:
+    store = _load_store()
+    active_profile_id = store.get("active_profile_id")
+    if active_profile_id:
+        for profile in store["profiles"]:
+            if profile.get("id") == active_profile_id:
+                return profile
+    for profile in store["profiles"]:
+        if profile.get("status") == "running":
+            return profile
+    return None
+
+
 def find_profile(profile_id: str) -> Optional[Dict[str, Any]]:
     for profile in list_profiles():
         if profile.get("id") == profile_id:

@@ -5,6 +5,7 @@ import json
 import hashlib
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 
@@ -21,6 +22,7 @@ _CACHE_TTL = 300.0  # 5 min
 
 _cached_models_raw: Optional[List[Dict[str, Any]]] = None
 _cached_at: float = 0.0
+_ollama_show_context_cache: Dict[Tuple[str, str], Tuple[float, Optional[int]]] = {}
 
 # Malli-metadatan sijainti (voit vaihtaa polkua env-muuttujalla MODEL_META_PATH)
 _MODEL_META_FILE = os.getenv("MODEL_META_PATH", "model_meta.json")
@@ -367,6 +369,7 @@ def invalidate_model_cache() -> None:
     global _cached_models_raw, _cached_at
     _cached_models_raw = None
     _cached_at = 0.0
+    _ollama_show_context_cache.clear()
     _invalidate_model_meta_cache()
 
 
@@ -714,6 +717,231 @@ def get_model_display_entries() -> List[Dict[str, Any]]:
     return entries
 
 
+def _positive_int(value: Any) -> Optional[int]:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, float) and not value.is_integer():
+        return None
+    try:
+        result = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return result if result > 0 else None
+
+
+def _parse_ollama_show_context(payload: Any) -> Optional[int]:
+    if not isinstance(payload, dict):
+        return None
+
+    parameters = payload.get("parameters")
+    if isinstance(parameters, str):
+        match = re.search(r"(?m)^\s*num_ctx\s+(\d+)\s*$", parameters)
+        if match:
+            configured = _positive_int(match.group(1))
+            if configured:
+                return configured
+
+    model_info = payload.get("model_info")
+    if not isinstance(model_info, dict):
+        return None
+    architecture = model_info.get("general.architecture")
+    if isinstance(architecture, str):
+        context = _positive_int(model_info.get(f"{architecture}.context_length"))
+        if context:
+            return context
+    for key, value in model_info.items():
+        if isinstance(key, str) and key.endswith(".context_length"):
+            context = _positive_int(value)
+            if context:
+                return context
+    return None
+
+
+def _fetch_ollama_runtime_contexts() -> Dict[str, int]:
+    if not llm_server_up():
+        return {}
+    try:
+        response = requests.get(
+            f"http://{settings.LLM_HOST}:{settings.LLM_PORT}/api/ps",
+            timeout=2,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception:
+        return {}
+
+    result: Dict[str, int] = {}
+    for model in payload.get("models", []) if isinstance(payload, dict) else []:
+        if not isinstance(model, dict):
+            continue
+        context = _positive_int(model.get("context_length"))
+        if not context:
+            continue
+        for key in ("name", "model"):
+            name = model.get(key)
+            if isinstance(name, str) and name:
+                result[name] = context
+    return result
+
+
+def _fetch_ollama_show_context(model_name: str) -> Optional[int]:
+    try:
+        response = requests.post(
+            f"http://{settings.LLM_HOST}:{settings.LLM_PORT}/api/show",
+            json={"model": model_name},
+            timeout=2,
+        )
+        response.raise_for_status()
+        return _parse_ollama_show_context(response.json())
+    except Exception:
+        return None
+
+
+def _get_ollama_show_contexts(models: List[Dict[str, Any]]) -> Dict[str, int]:
+    if not models or not llm_server_up():
+        return {}
+
+    now = time.time()
+    expired_keys = [
+        key for key, cached in _ollama_show_context_cache.items()
+        if now - cached[0] >= _CACHE_TTL
+    ]
+    for key in expired_keys:
+        _ollama_show_context_cache.pop(key, None)
+    result: Dict[str, int] = {}
+    missing: List[Tuple[str, str]] = []
+    seen: set[Tuple[str, str]] = set()
+    for model in models:
+        name = str(model.get("name") or "").strip()
+        if not name:
+            continue
+        key = (name, str(model.get("digest") or ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        cached = _ollama_show_context_cache.get(key)
+        if cached and now - cached[0] < _CACHE_TTL:
+            if cached[1]:
+                result[name] = cached[1]
+            continue
+        missing.append(key)
+
+    if missing:
+        with ThreadPoolExecutor(max_workers=min(4, len(missing))) as executor:
+            futures = {executor.submit(_fetch_ollama_show_context, key[0]): key for key in missing}
+            for future in as_completed(futures):
+                key = futures[future]
+                try:
+                    context = future.result()
+                except Exception:
+                    context = None
+                _ollama_show_context_cache[key] = (now, context)
+                if context:
+                    result[key[0]] = context
+    return result
+
+
+def _get_ollama_contexts(
+    raw_models: List[Dict[str, Any]],
+    meta_map: Dict[str, Dict[str, Any]],
+) -> Dict[str, int]:
+    runtime_contexts = _fetch_ollama_runtime_contexts()
+    raw_by_name = {
+        str(model.get("name")): model
+        for model in raw_models
+        if model.get("name") and not is_profile_backing_model(str(model.get("name")))
+    }
+    candidate_names = list(raw_by_name)
+    for name, meta in meta_map.items():
+        if name not in raw_by_name and _profile_meta(meta)["enabled"] and not is_profile_backing_model(name):
+            candidate_names.append(name)
+
+    result: Dict[str, int] = {}
+    show_candidates: List[Dict[str, Any]] = []
+    show_name_for_public: Dict[str, str] = {}
+    for name in candidate_names:
+        meta = meta_map.get(name, {})
+        profile = _profile_meta(meta)
+        backing = str(profile.get("backing_model") or "")
+        runtime = runtime_contexts.get(backing) if backing else None
+        runtime = runtime or runtime_contexts.get(name)
+        if runtime:
+            result[name] = runtime
+            continue
+
+        configured = _positive_int(profile.get("parameters", {}).get("num_ctx")) if profile["enabled"] else None
+        if configured:
+            result[name] = configured
+            continue
+
+        show_name = str(profile.get("base_model") or name) if profile["enabled"] else name
+        source_model = raw_by_name.get(show_name) or raw_by_name.get(name) or {"name": show_name}
+        show_candidates.append({**source_model, "name": show_name})
+        show_name_for_public[name] = show_name
+
+    show_contexts = _get_ollama_show_contexts(show_candidates) if show_candidates else {}
+    for public_name, show_name in show_name_for_public.items():
+        context = show_contexts.get(show_name)
+        if context:
+            result[public_name] = context
+    return result
+
+
+def _llama_cpp_profile_context(profile: Dict[str, Any]) -> Optional[int]:
+    context = _positive_int(profile.get("ctx_size"))
+    if not context:
+        return None
+    parallel = _positive_int(profile.get("parallel")) or 1
+    per_slot = context // parallel
+    return per_slot if per_slot > 0 else None
+
+
+def _fetch_llama_cpp_runtime_context(profile: Optional[Dict[str, Any]]) -> Optional[int]:
+    if not profile:
+        return None
+    try:
+        response = requests.get(
+            f"{llama_cpp_provider.profile_base_url(profile).rstrip('/')}/props",
+            timeout=2,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            return None
+        settings_payload = payload.get("default_generation_settings")
+        if not isinstance(settings_payload, dict):
+            return None
+        return _positive_int(settings_payload.get("n_ctx"))
+    except Exception:
+        return None
+
+
+def _get_llama_cpp_contexts(profiles: List[Dict[str, Any]]) -> Dict[str, int]:
+    if not profiles:
+        return {}
+    active_profile = llama_cpp_provider.get_active_profile()
+    runtime_context = _fetch_llama_cpp_runtime_context(active_profile)
+    active_id = active_profile.get("id") if active_profile else None
+    result: Dict[str, int] = {}
+    for profile in profiles:
+        served = str(profile.get("served_model_id") or "").strip()
+        if not served:
+            continue
+        context = runtime_context if active_id and profile.get("id") == active_id else None
+        context = context or _llama_cpp_profile_context(profile)
+        if context:
+            result[served] = context
+    return result
+
+
+def _advertise_context(entry: Dict[str, Any], context: Optional[int]) -> None:
+    if not context:
+        return
+    entry["context_length"] = context
+    entry["max_input_tokens"] = context
+    entry["n_ctx"] = context
+
+
 def get_models_openai_format() -> List[Dict[str, Any]]:
     """
     Palauttaa mallilistan OpenAI-yhteensopivassa muodossa
@@ -729,6 +957,9 @@ def get_models_openai_format() -> List[Dict[str, Any]]:
     result: List[Dict[str, Any]] = []
     raw = _get_raw_models()
     meta_map = _load_meta()
+    llama_cpp_profiles = llama_cpp_provider.list_profiles()
+    ollama_contexts = _get_ollama_contexts(raw, meta_map)
+    llama_cpp_contexts = _get_llama_cpp_contexts(llama_cpp_profiles)
     base_ts = 1730000000
 
     for idx, m in enumerate(raw):
@@ -771,6 +1002,7 @@ def get_models_openai_format() -> List[Dict[str, Any]]:
         # Tallenna raaka mallinimi metatietoon proxytymista varten.
         if has_custom_alias:
             entry["metadata"]["raw_model_name"] = name
+        _advertise_context(entry, ollama_contexts.get(name))
         result.append(entry)
 
     seen_display_names: set[str] = {item["id"] for item in result}
@@ -800,35 +1032,36 @@ def get_models_openai_format() -> List[Dict[str, Any]]:
         }
         if "alias" in meta and meta["alias"]:
             entry["metadata"]["raw_model_name"] = name
+        _advertise_context(entry, ollama_contexts.get(name))
         result.append(entry)
 
-    for profile in llama_cpp_provider.list_profiles():
+    for profile in llama_cpp_profiles:
         served = str(profile.get("served_model_id") or "").strip()
         if not served or served in seen_display_names:
             continue
         seen_display_names.add(served)
-        result.append(
-            {
-                "id": served,
-                "object": "model",
-                "created": base_ts + len(result),
-                "owned_by": "llama.cpp",
-                "metadata": {
-                    "source": "local",
-                    "device": "gpu",
+        entry = {
+            "id": served,
+            "object": "model",
+            "created": base_ts + len(result),
+            "owned_by": "llama.cpp",
+            "metadata": {
+                "source": "local",
+                "device": "gpu",
+                "provider": "llama_cpp",
+                "profile": {
+                    "enabled": True,
                     "provider": "llama_cpp",
-                    "profile": {
-                        "enabled": True,
-                        "provider": "llama_cpp",
-                        "profile_id": profile.get("id"),
-                        "gguf_path": profile.get("gguf_path"),
-                        "status": profile.get("status", "stopped"),
-                        "port": profile.get("port"),
-                    },
+                    "profile_id": profile.get("id"),
+                    "gguf_path": profile.get("gguf_path"),
+                    "status": profile.get("status", "stopped"),
+                    "port": profile.get("port"),
                 },
-                "description": f"{served} [llama.cpp GPU-local]",
-            }
-        )
+            },
+            "description": f"{served} [llama.cpp GPU-local]",
+        }
+        _advertise_context(entry, llama_cpp_contexts.get(served))
+        result.append(entry)
 
     # Jos jostain syystä tyhjä, fallback DEFAULT_MODELS
     if not result:
@@ -856,6 +1089,8 @@ def get_models_openai_format() -> List[Dict[str, Any]]:
             )
 
     return result
+
+
 def get_model_table_status() -> List[Dict[str, Any]]:
     """
     Palauttaa listan rivejä UI:lle ja /api/models -endpointille.
