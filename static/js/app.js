@@ -1620,13 +1620,13 @@ async function refreshOllamaProviderModels(showLoading = true) {
 async function removeOllamaProfile(modelId) {
   const name = String(modelId || "").trim();
   if (!name) return;
-  if (!window.confirm(`Remove llm-agent profile mapping for "${name}"?`)) return;
+  if (!window.confirm(`Remove llm-agent profile and private backing model for "${name}"?`)) return;
   setOllamaButtonsDisabled(true);
   try {
     const data = await getJson(`/api/providers/ollama/profiles/${encodeURIComponent(name)}`, { method: "DELETE" });
     ollamaProfiles = data.profiles || [];
     renderOllamaProviderRows(data.models || []);
-    setOllamaProviderStatus(`Profile mapping removed for ${name}.`, false);
+    setOllamaProviderStatus(data.message || `Profile removed for ${name}.`, false);
   } catch (err) {
     setOllamaProviderStatus(`Remove profile failed: ${err}`, true);
   } finally {

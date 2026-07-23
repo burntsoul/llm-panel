@@ -38,6 +38,34 @@ class TestOllamaProviderApi(unittest.TestCase):
         self.assertTrue(delete_mock.call_args.args[0].endswith("/api/delete"))
         self.assertEqual(delete_mock.call_args.kwargs["json"], {"model": "gemma4:latest"})
 
+    @patch("app._ollama_delete_request")
+    def test_delete_ollama_model_if_present_removes_private_backing_model(self, delete_request_mock):
+        response_mock = MagicMock()
+        response_mock.ok = True
+        response_mock.status_code = 200
+        delete_request_mock.return_value = response_mock
+
+        removed, missing = app_module._delete_ollama_model_if_present("llm-agent/profile-gemma4-12b:latest")
+
+        delete_request_mock.assert_called_once_with("llm-agent/profile-gemma4-12b:latest")
+        self.assertTrue(removed)
+        self.assertFalse(missing)
+
+    @patch("app._ollama_delete_request")
+    def test_delete_ollama_model_if_present_tolerates_missing_private_backing_model(self, delete_request_mock):
+        response_mock = MagicMock()
+        response_mock.ok = False
+        response_mock.status_code = 404
+        response_mock.json.return_value = {"error": "model not found"}
+        response_mock.text = "model not found"
+        delete_request_mock.return_value = response_mock
+
+        removed, missing = app_module._delete_ollama_model_if_present("llm-agent/profile-gemma4-12b:latest")
+
+        delete_request_mock.assert_called_once_with("llm-agent/profile-gemma4-12b:latest")
+        self.assertFalse(removed)
+        self.assertTrue(missing)
+
 
 if __name__ == "__main__":
     unittest.main()

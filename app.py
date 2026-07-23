@@ -52,6 +52,7 @@ from models import (
     sync_model_meta_with_ollama,
     delete_model_profile,
     get_model_profiles,
+    get_profile_for_model,
     is_profile_backing_model,
     resolve_model_for_upstream,
     rewrite_model_ids,
@@ -1626,6 +1627,21 @@ def _profile_response() -> dict:
     }
 
 
+def _delete_ollama_model_if_present(model: str, error_prefix: str = "Ollama delete failed") -> tuple[bool, bool]:
+    try:
+        resp = _ollama_delete_request(model)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail={"error": f"{error_prefix}: {exc}"})
+
+    if resp.ok:
+        return True, False
+
+    message = _ollama_error_message(resp)
+    if resp.status_code == 404 or "not found" in message.lower() or "does not exist" in message.lower():
+        return False, True
+    raise HTTPException(status_code=resp.status_code, detail={"error": message})
+
+
 @app.get("/api/providers/ollama/models")
 async def api_ollama_provider_models():
     await _ensure_ollama_for_management()
@@ -1826,9 +1842,43 @@ async def api_ollama_delete_profile_backing(public_model: str):
 
 @app.delete("/api/providers/ollama/profiles/{public_model:path}")
 async def api_ollama_delete_profile(public_model: str):
-    delete_model_profile(public_model)
+    public_model = str(public_model or "").strip()
+    if not public_model:
+        raise HTTPException(status_code=400, detail={"error": "public_model is required"})
+
+    profile = get_profile_for_model(public_model)
+    backing_model = profile_backing_model_name(public_model)
+    if profile and profile.get("backing_model"):
+        backing_model = str(profile["backing_model"])
+
+    await _ensure_ollama_for_management()
+
+    loop = asyncio.get_running_loop()
+    backing_removed, backing_missing = await loop.run_in_executor(
+        None,
+        lambda: _delete_ollama_model_if_present(
+            backing_model,
+            "Ollama backing delete failed",
+        ),
+    )
+
+    removed = delete_model_profile(public_model)
     invalidate_model_cache()
-    return _profile_response()
+    response = _profile_response()
+    response.update(
+        {
+            "message": (
+                f"Profile and backing model removed for '{public_model}'."
+                if backing_removed
+                else f"Profile mapping removed for '{public_model}'; backing model was already missing."
+            ),
+            "profile_mapping_removed": removed is not None,
+            "backing_model": backing_model,
+            "backing_removed": backing_removed,
+            "backing_missing": backing_missing,
+        }
+    )
+    return response
 
 
 # ============================================================================
