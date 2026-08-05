@@ -1908,7 +1908,10 @@ function renderLlamaCppDownload() {
     if (logs) logs.textContent = "";
     return;
   }
-  status.textContent = `${job.status || "unknown"}: ${job.repo_id || ""} ${job.filename || ""} -> ${job.target_path || ""}`;
+  const fileCount = Array.isArray(job.filenames) ? job.filenames.length : 1;
+  const shardSummary = fileCount > 1 ? ` (${fileCount} shards)` : "";
+  const destination = fileCount > 1 ? job.target_dir : job.target_path;
+  status.textContent = `${job.status || "unknown"}: ${job.repo_id || ""} ${job.filename || ""}${shardSummary} -> ${destination || ""}`;
 }
 
 function isLlamaCppDownloadActive() {

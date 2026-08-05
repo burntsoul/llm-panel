@@ -16,6 +16,11 @@ from config import settings
 
 
 PROVIDER_CONFIG_PATH = Path(os.getenv("LLAMA_CPP_PROVIDER_CONFIG", "config/llama_cpp.json"))
+MAX_GGUF_SHARDS = 1000
+GGUF_SHARD_RE = re.compile(
+    r"^(?P<prefix>.+-)(?P<part>\d{5})-of-(?P<total>\d{5})(?P<suffix>\.gguf)$",
+    re.IGNORECASE,
+)
 
 
 DEFAULT_PROVIDER_SETTINGS: Dict[str, Any] = {
@@ -259,6 +264,25 @@ def validate_hf_filename(filename: str) -> str:
     return filename
 
 
+def expand_hf_filenames(filename: str) -> List[str]:
+    filename = validate_hf_filename(filename)
+    match = GGUF_SHARD_RE.fullmatch(filename)
+    if not match:
+        return [filename]
+    part = int(match.group("part"))
+    total = int(match.group("total"))
+    if part < 1 or total < 1 or part > total:
+        raise ValueError("invalid GGUF shard number")
+    if total > MAX_GGUF_SHARDS:
+        raise ValueError(f"GGUF shard count must not exceed {MAX_GGUF_SHARDS}")
+    prefix = match.group("prefix")
+    suffix = match.group("suffix")
+    return [
+        f"{prefix}{shard:05d}-of-{total:05d}{suffix}"
+        for shard in range(1, total + 1)
+    ]
+
+
 def hf_download_target_dir(repo_id: str, cfg: Optional[Dict[str, Any]] = None) -> str:
     repo_id = validate_hf_repo_id(repo_id)
     provider_settings = cfg or get_provider_settings()
@@ -281,12 +305,21 @@ def _download_log_path(cfg: Optional[Dict[str, Any]] = None) -> str:
     return f"{str(provider_settings.get('runtime_dir')).rstrip('/')}/hf-download.log"
 
 
-def build_hf_download_command(repo_id: str, filename: str, cfg: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
+def build_hf_download_command(
+    repo_id: str,
+    filename: str,
+    cfg: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     provider_settings = cfg or get_provider_settings()
     repo_id = validate_hf_repo_id(repo_id)
     filename = validate_hf_filename(filename)
+    filenames = expand_hf_filenames(filename)
     target_dir = hf_download_target_dir(repo_id, provider_settings)
     target_path = hf_download_target_path(repo_id, filename, provider_settings)
+    target_paths = [
+        hf_download_target_path(repo_id, item, provider_settings)
+        for item in filenames
+    ]
     runtime_dir = str(provider_settings.get("runtime_dir")).rstrip("/")
     log_file = _download_log_path(provider_settings)
     pid_file = _download_pid_path(provider_settings)
@@ -295,7 +328,8 @@ def build_hf_download_command(repo_id: str, filename: str, cfg: Optional[Dict[st
         env_prefix = f"HF_TOKEN={shlex.quote(str(provider_settings['hf_token']))} "
     command = (
         f"{env_prefix}\"$hf_cmd\" download "
-        f"{shlex.quote(repo_id)} {shlex.quote(filename)} "
+        f"{shlex.quote(repo_id)} "
+        f"{' '.join(shlex.quote(item) for item in filenames)} "
         f"--local-dir {shlex.quote(target_dir)}"
     )
     remote = (
@@ -317,6 +351,8 @@ def build_hf_download_command(repo_id: str, filename: str, cfg: Optional[Dict[st
         "remote": remote,
         "target_dir": target_dir,
         "target_path": target_path,
+        "filenames": filenames,
+        "target_paths": target_paths,
         "pid_path": pid_file,
         "log_path": log_file,
     }
@@ -335,17 +371,24 @@ def get_download_job() -> Optional[Dict[str, Any]]:
 
 def refresh_download_job_status(job: Dict[str, Any]) -> Dict[str, Any]:
     pid_file = str(job.get("pid_path") or "")
-    target_path = str(job.get("target_path") or "")
+    target_paths = job.get("target_paths")
+    if not isinstance(target_paths, list) or not target_paths:
+        target_paths = [str(job.get("target_path") or "")]
+    target_paths = [str(path) for path in target_paths if str(path)]
     if not pid_file:
         return job
+    completion_test = " && ".join(
+        f"test -f {shlex.quote(path)}"
+        for path in target_paths
+    ) or "false"
     remote = (
-        "pidfile={pid}; target={target}; "
+        "pidfile={pid}; "
         "if [ -f \"$pidfile\" ]; then "
         "pid=$(cat \"$pidfile\" 2>/dev/null); "
         "if [ -n \"$pid\" ] && kill -0 \"$pid\" 2>/dev/null; then echo running; exit 0; fi; "
         "fi; "
-        "if [ -f \"$target\" ]; then echo completed; else echo failed; fi"
-    ).format(pid=shlex.quote(pid_file), target=shlex.quote(target_path))
+        "if {completion_test}; then echo completed; else echo failed; fi"
+    ).format(pid=shlex.quote(pid_file), completion_test=completion_test)
     ok, output = run_ssh(remote)
     status = str(job.get("status") or "unknown")
     if ok:
@@ -376,8 +419,10 @@ def start_hf_download(repo_id: str, filename: str) -> Dict[str, Any]:
         "id": uuid.uuid4().hex[:12],
         "repo_id": validate_hf_repo_id(repo_id),
         "filename": validate_hf_filename(filename),
+        "filenames": command_info["filenames"],
         "target_dir": command_info["target_dir"],
         "target_path": command_info["target_path"],
+        "target_paths": command_info["target_paths"],
         "pid_path": command_info["pid_path"],
         "log_path": command_info["log_path"],
         "status": "starting",

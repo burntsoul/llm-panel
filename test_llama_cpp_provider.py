@@ -468,6 +468,26 @@ class TestLlamaCppProvider(unittest.TestCase):
         with self.assertRaises(ValueError):
             llama_cpp_provider.validate_hf_filename("model.bin")
 
+    def test_hf_download_expands_complete_multipart_set(self):
+        filenames = llama_cpp_provider.expand_hf_filenames(
+            "UD-Q4_K_XL/Laguna-S-2.1-UD-Q4_K_XL-00002-of-00003.gguf"
+        )
+
+        self.assertEqual(
+            filenames,
+            [
+                "UD-Q4_K_XL/Laguna-S-2.1-UD-Q4_K_XL-00001-of-00003.gguf",
+                "UD-Q4_K_XL/Laguna-S-2.1-UD-Q4_K_XL-00002-of-00003.gguf",
+                "UD-Q4_K_XL/Laguna-S-2.1-UD-Q4_K_XL-00003-of-00003.gguf",
+            ],
+        )
+        self.assertEqual(
+            llama_cpp_provider.expand_hf_filenames("model-Q4_K_M.gguf"),
+            ["model-Q4_K_M.gguf"],
+        )
+        with self.assertRaises(ValueError):
+            llama_cpp_provider.expand_hf_filenames("model-00004-of-00003.gguf")
+
     def test_hf_download_command_builder(self):
         llama_cpp_provider.update_provider_settings({"hf_token": "hf_secret"})
 
@@ -483,6 +503,43 @@ class TestLlamaCppProvider(unittest.TestCase):
         self.assertTrue(command["target_path"].endswith(".gguf"))
         self.assertIn("nohup", command["remote"])
         self.assertIn("command -v hf", command["remote"])
+
+    def test_hf_download_command_builder_includes_all_multipart_shards(self):
+        command = llama_cpp_provider.build_hf_download_command(
+            "unsloth/Laguna-S-2.1-GGUF",
+            "UD-Q4_K_XL/Laguna-S-2.1-UD-Q4_K_XL-00002-of-00003.gguf",
+        )
+
+        self.assertEqual(len(command["filenames"]), 3)
+        self.assertEqual(len(command["target_paths"]), 3)
+        for shard in range(1, 4):
+            self.assertIn(
+                f"Laguna-S-2.1-UD-Q4_K_XL-{shard:05d}-of-00003.gguf",
+                command["command"],
+            )
+
+    @patch("llama_cpp_provider.run_ssh")
+    def test_hf_download_completion_requires_every_multipart_shard(self, run_ssh_mock):
+        run_ssh_mock.return_value = True, "completed"
+        target_paths = [
+            f"/models/llama/model-{shard:05d}-of-00003.gguf"
+            for shard in range(1, 4)
+        ]
+
+        refreshed = llama_cpp_provider.refresh_download_job_status(
+            {
+                "status": "running",
+                "pid_path": "/tmp/hf-download.pid",
+                "target_path": target_paths[0],
+                "target_paths": target_paths,
+            }
+        )
+
+        self.assertEqual(refreshed["status"], "completed")
+        remote = run_ssh_mock.call_args.args[0]
+        for path in target_paths:
+            self.assertIn(path, remote)
+        self.assertEqual(remote.count("test -f /models/llama/model-"), 3)
 
     @patch("llama_cpp_provider.run_ssh")
     def test_hf_download_rejects_second_active_job(self, run_ssh_mock):
