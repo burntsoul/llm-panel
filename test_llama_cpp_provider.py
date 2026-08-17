@@ -108,6 +108,42 @@ class TestLlamaCppProvider(unittest.TestCase):
         self.assertNotIn("--prompt-cache", args)
         self.assertIn("--no-mmap", args)
 
+    def test_profile_can_override_provider_binary(self):
+        llama_cpp_provider.update_provider_settings(
+            {"binary_path": "/usr/local/bin/llama-server"}
+        )
+        profile = llama_cpp_provider.upsert_profile(
+            {
+                "served_model_id": "ling-local",
+                "gguf_path": "/models/llama/ling.gguf",
+                "binary_path": "/home/teemu/bin/llama-server-turboquant",
+            }
+        )
+
+        args = llama_cpp_provider.build_llama_server_args(profile)
+
+        self.assertEqual(args[0], "/home/teemu/bin/llama-server-turboquant")
+        self.assertEqual(
+            llama_cpp_provider.profile_binary_path(profile),
+            "/home/teemu/bin/llama-server-turboquant",
+        )
+
+    def test_profile_without_binary_override_inherits_provider_binary(self):
+        llama_cpp_provider.update_provider_settings(
+            {"binary_path": "/usr/local/bin/llama-server"}
+        )
+        profile = llama_cpp_provider.upsert_profile(
+            {
+                "served_model_id": "qwen-local",
+                "gguf_path": "/models/llama/qwen.gguf",
+            }
+        )
+
+        self.assertEqual(
+            llama_cpp_provider.build_llama_server_args(profile)[0],
+            "/usr/local/bin/llama-server",
+        )
+
     def test_profile_update_enables_prompt_cache(self):
         profile = llama_cpp_provider.upsert_profile(
             {

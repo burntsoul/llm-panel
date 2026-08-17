@@ -43,6 +43,7 @@ DEFAULT_PROVIDER_SETTINGS: Dict[str, Any] = {
 
 
 RUNTIME_DEFAULTS: Dict[str, Any] = {
+    "binary_path": "",
     "ctx_size": 0,
     "n_gpu_layers": None,
     "main_gpu": None,
@@ -659,10 +660,19 @@ def _slot_cache_path(profile: Dict[str, Any], cfg: Optional[Dict[str, Any]] = No
     return f"{str(provider_settings.get('cache_dir') or '/models/llama/.llm-agent-cache').rstrip('/')}/{safe}"
 
 
+def profile_binary_path(profile: Dict[str, Any], cfg: Optional[Dict[str, Any]] = None) -> str:
+    provider_settings = cfg or get_provider_settings()
+    return str(
+        profile.get("binary_path")
+        or provider_settings.get("binary_path")
+        or "/usr/local/bin/llama-server"
+    )
+
+
 def build_llama_server_args(profile: Dict[str, Any], cfg: Optional[Dict[str, Any]] = None) -> List[str]:
     provider_settings = cfg or get_provider_settings()
     args = [
-        str(provider_settings.get("binary_path") or "/usr/local/bin/llama-server"),
+        profile_binary_path(profile, provider_settings),
         "--host",
         str(provider_settings.get("default_host") or "0.0.0.0"),
         "--port",
@@ -809,7 +819,7 @@ def start_profile(profile_id: str) -> Dict[str, Any]:
     slot_cache_path = _slot_cache_path(profile, cfg) if profile.get("cache_enabled") else cache_dir
     pid_file = pid_path(profile, cfg)
     out_log = log_path(profile, cfg)
-    binary = str(cfg.get("binary_path"))
+    binary = profile_binary_path(profile, cfg)
     model = str(profile.get("gguf_path"))
     command = shlex.join(args)
     remote = (

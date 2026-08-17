@@ -2039,6 +2039,7 @@ function openLlamaCppProfileEditor(profile = null, artifact = null) {
   const hints = {
     served_model_id: "Stable public name clients will request, e.g. qwen3-a3b:256k.",
     gguf_path: "Full path below /models/llama. Use a scanned artifact when possible.",
+    binary_path: "Optional llama-server binary for this profile. Empty inherits the provider-wide binary.",
     port: "llama-server HTTP port. 8081 is the default for the first profile.",
     ctx_size: "Context tokens. Try 4096 for smoke tests, 131072 or 262144 for long-context agents.",
     n_gpu_layers: "GPU offload layers. Empty lets llama.cpp choose; 999 often means as many as possible.",
@@ -2072,6 +2073,7 @@ function openLlamaCppProfileEditor(profile = null, artifact = null) {
   const fields = [
     ["Served model ID", "served_model_id", "text", profileValue(profile, "served_model_id", "")],
     ["GGUF path", "gguf_path", "text", ggufPath],
+    ["llama-server override", "binary_path", "text", profileValue(profile, "binary_path", "")],
     ["Port", "port", "number", profileValue(profile, "port", settings.default_port || 8081)],
     ["Context", "ctx_size", "number", profileValue(profile, "ctx_size", 262144)],
     ["GPU layers", "n_gpu_layers", "number", profileValue(profile, "n_gpu_layers", "")],
