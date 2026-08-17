@@ -37,7 +37,7 @@ from llm_server import (
     ensure_llm_running_with_reason,
     ensure_llm_running_and_ready,
     idle_shutdown_loop,
-    cpu_activity_poller,
+    llm_activity_poller,
     touch_activity,
 )
 from models import (
@@ -104,8 +104,8 @@ async def _startup():
     prune_gpu_history(_gpu_history_db_path())
     # Käynnistä idle-shutdown -looppi taustalle
     asyncio.create_task(idle_shutdown_loop())
-    # Käynnistä CPU-aktiviteetin polleri
-    asyncio.create_task(cpu_activity_poller())
+    # Käynnistä llama.cpp slot + supplemental CPU activity poller
+    asyncio.create_task(llm_activity_poller())
     # Käynnistä ComfyUI idle-shutdown looppi
     asyncio.create_task(comfyui_idle_shutdown_loop())
     app.state.gpu_watchdog = GPUWatchdogService(sample_recorder=record_gpu_status_sample)
@@ -2191,6 +2191,8 @@ async def api_llama_cpp_delete_profile(profile_id: str):
 
 @app.post("/api/providers/llama-cpp/profiles/{profile_id}/start")
 async def api_llama_cpp_start_profile(profile_id: str):
+    # Starting/switching a profile is active work even before /slots reaches 503/200.
+    touch_activity()
     try:
         profile = await asyncio.get_running_loop().run_in_executor(
             None,
@@ -2215,6 +2217,7 @@ async def api_llama_cpp_stop_profile(profile_id: str):
 
 @app.post("/api/providers/llama-cpp/profiles/{profile_id}/restart")
 async def api_llama_cpp_restart_profile(profile_id: str):
+    touch_activity()
     try:
         profile = await asyncio.get_running_loop().run_in_executor(
             None,

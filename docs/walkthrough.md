@@ -42,23 +42,38 @@
 ### Scenario C: Auto idle shutdown
 
 1. You stop using the LLM (no UI or VS Code activity).
-2. CPU load drops below `CPU_BUSY_THRESHOLD_FOR_IDLE`.
-3. `cpu_activity_poller()` no longer calls `_touch_activity()`.
-4. After `LLM_IDLE_SECONDS` (e.g. 30 min) of inactivity:
+2. `llm_activity_poller()` checks the managed llama.cpp profile's `GET /slots`
+   endpoint every `CPU_POLL_INTERVAL_SECONDS` (normally 10 seconds).
+3. A slot with `is_processing: true`, a loading/profile-switch response, or CPU
+   at or above `CPU_BUSY_THRESHOLD_FOR_IDLE` refreshes the activity timer. CPU is
+   supplemental: low CPU never proves that llama.cpp is idle.
+4. After `LLM_IDLE_SECONDS` (normally one hour) without observed activity:
 
    * `idle_shutdown_loop` sees that:
 
      * LLM is up
+     * the most recent slot state is fresh and definitively `idle` or `no_server`
+     * CPU is below the supplemental activity threshold
+     * there is no active lease or maintenance hold
      * idle time exceeded threshold
-   * Calls `lo100_power("soft")` to request a graceful OS shutdown.
+   * It performs one final `GET /slots` probe. Shutdown proceeds only if that
+     response is still definitively `idle` or `no_server`.
+   * Calls the Proxmox graceful shutdown operation.
 5. Eventually LLM server goes down, but LO100 remains accessible.
+
+If the slot endpoint is malformed, forbidden, timed out, otherwise unavailable,
+or its cached state becomes stale, the state is `unknown` and automatic shutdown
+is inhibited indefinitely until a valid slot response returns. HTTP 503 while a
+profile is loading also inhibits shutdown. This favors preserving in-flight work
+over power savings.
 
 ### Scenario D: VS Code uses the LLM directly
 
 1. VS Code (Continue) calls `http://LLM_HOST:11434` directly.
 2. Ollama spins up a model and CPU climbs (e.g. > 50%).
-3. `cpu_activity_poller()`:
+3. `llm_activity_poller()`:
 
+   * Checks managed llama.cpp slots when a provider profile is active.
    * Polls Glances `/cpu`.
    * Sees `total >= CPU_BUSY_THRESHOLD_FOR_IDLE`.
    * Calls `_touch_activity()`.

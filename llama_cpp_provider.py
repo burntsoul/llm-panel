@@ -22,6 +22,12 @@ GGUF_SHARD_RE = re.compile(
     re.IGNORECASE,
 )
 
+SLOT_STATE_BUSY = "busy"
+SLOT_STATE_IDLE = "idle"
+SLOT_STATE_LOADING = "loading"
+SLOT_STATE_UNKNOWN = "unknown"
+SLOT_STATE_NO_SERVER = "no_server"
+
 
 DEFAULT_PROVIDER_SETTINGS: Dict[str, Any] = {
     "ssh_enabled": False,
@@ -187,7 +193,7 @@ def _ssh_base_command(provider_settings: Optional[Dict[str, Any]] = None) -> Lis
     return cmd
 
 
-def run_ssh(remote_cmd: str, timeout: Optional[int] = None) -> Tuple[bool, str]:
+def run_ssh(remote_cmd: str, timeout: Optional[float] = None) -> Tuple[bool, str]:
     cfg = get_provider_settings()
     cmd = _ssh_base_command(cfg)
     cmd.append(remote_cmd)
@@ -496,6 +502,10 @@ def _profile_runtime(values: Dict[str, Any]) -> Dict[str, Any]:
         runtime["extra_args"] = shlex.split(runtime["extra_args"])
     if not isinstance(runtime.get("extra_args"), list):
         runtime["extra_args"] = []
+    normalized_extra_args = [str(item) for item in runtime["extra_args"] if item is not None]
+    if any(item == "--no-slots" or item.startswith("--no-slots=") for item in normalized_extra_args):
+        raise ValueError("--no-slots is not allowed because slot activity protects the LLM VM from idle shutdown")
+    runtime["extra_args"] = [item for item in normalized_extra_args if item != "--slots"]
     for key in [
         "ctx_size",
         "n_gpu_layers",
@@ -681,6 +691,7 @@ def build_llama_server_args(profile: Dict[str, Any], cfg: Optional[Dict[str, Any
         str(profile["gguf_path"]),
         "--alias",
         str(profile["served_model_id"]),
+        "--slots",
     ]
     flag_map = [
         ("ctx_size", "--ctx-size"),
@@ -720,8 +731,14 @@ def build_llama_server_args(profile: Dict[str, Any], cfg: Optional[Dict[str, Any
             args.extend(["--checkpoint-min-step", str(checkpoint_min_step)])
         args.extend(["--slot-save-path", _slot_cache_path(profile, provider_settings)])
     for item in profile.get("extra_args") or []:
-        if item is not None and str(item).strip():
-            args.append(str(item))
+        if item is None or not str(item).strip():
+            continue
+        item = str(item)
+        if item == "--no-slots" or item.startswith("--no-slots="):
+            raise ValueError("--no-slots is not allowed because slot activity protects the LLM VM from idle shutdown")
+        if item == "--slots":
+            continue
+        args.append(item)
     return args
 
 
@@ -738,7 +755,7 @@ def _set_profile_status(profile_id: str, status: str, error: Optional[str] = Non
     _write_store(store)
 
 
-def status_for_profile(profile: Dict[str, Any]) -> Dict[str, Any]:
+def status_for_profile(profile: Dict[str, Any], timeout: Optional[float] = None) -> Dict[str, Any]:
     cfg = get_provider_settings()
     pid_file = pid_path(profile, cfg)
     model = str(profile.get("gguf_path") or "")
@@ -749,7 +766,7 @@ def status_for_profile(profile: Dict[str, Any]) -> Dict[str, Any]:
         "if [ -n \"$pid\" ] && kill -0 \"$pid\" 2>/dev/null && tr '\\0' ' ' < /proc/$pid/cmdline | grep -F -- \"$model\" >/dev/null 2>&1; then "
         "echo running; exit 0; fi; fi; echo stopped"
     ).format(pid=shlex.quote(pid_file), model=shlex.quote(model))
-    ok, output = run_ssh(remote)
+    ok, output = run_ssh(remote, timeout=timeout)
     status = "unknown"
     if ok:
         status = "running" if "running" in output else "stopped"
@@ -909,6 +926,137 @@ def profile_base_url(profile: Dict[str, Any]) -> str:
     cfg = get_provider_settings()
     host = str(cfg.get("ssh_host") or settings.LLM_HOST)
     return f"http://{host}:{int(profile.get('port') or cfg.get('default_port') or 8081)}"
+
+
+def _slot_activity_result(
+    state: str,
+    profile: Optional[Dict[str, Any]] = None,
+    *,
+    active_slots: int = 0,
+    total_slots: int = 0,
+    error: Optional[str] = None,
+) -> Dict[str, Any]:
+    return {
+        "state": state,
+        "profile_id": profile.get("id") if profile else None,
+        "served_model_id": profile.get("served_model_id") if profile else None,
+        "active_slots": int(active_slots),
+        "total_slots": int(total_slots),
+        "error": error,
+    }
+
+
+def no_server_slot_activity() -> Dict[str, Any]:
+    return _slot_activity_result(SLOT_STATE_NO_SERVER)
+
+
+def parse_slot_activity_payload(payload: Any, profile: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    if not isinstance(payload, list) or not payload:
+        return _slot_activity_result(
+            SLOT_STATE_UNKNOWN,
+            profile,
+            error="slot endpoint returned an empty or non-list payload",
+        )
+
+    active_slots = 0
+    malformed = False
+    for slot in payload:
+        if not isinstance(slot, dict) or not isinstance(slot.get("is_processing"), bool):
+            malformed = True
+        elif slot["is_processing"]:
+            active_slots += 1
+
+    if active_slots:
+        state = SLOT_STATE_BUSY
+    elif malformed:
+        return _slot_activity_result(
+            SLOT_STATE_UNKNOWN,
+            profile,
+            total_slots=len(payload),
+            error="slot endpoint payload is missing boolean is_processing",
+        )
+    else:
+        state = SLOT_STATE_IDLE
+    return _slot_activity_result(
+        state,
+        profile,
+        active_slots=active_slots,
+        total_slots=len(payload),
+    )
+
+
+def _slot_probe_failure(
+    profile: Dict[str, Any],
+    error: str,
+    *,
+    status_timeout: float,
+) -> Dict[str, Any]:
+    try:
+        process_status = status_for_profile(profile, timeout=status_timeout).get("status")
+    except Exception as exc:
+        process_status = "unknown"
+        error = f"{error}; profile status check failed: {exc}"
+    if process_status == "stopped":
+        return _slot_activity_result(
+            SLOT_STATE_NO_SERVER,
+            profile,
+            error=error,
+        )
+    return _slot_activity_result(
+        SLOT_STATE_UNKNOWN,
+        profile,
+        error=error,
+    )
+
+
+def probe_active_profile_slots(timeout: float = 2.0) -> Dict[str, Any]:
+    started_at = time.monotonic()
+
+    def remaining_timeout() -> float:
+        return max(0.1, float(timeout) - (time.monotonic() - started_at))
+
+    try:
+        profile = get_active_profile()
+    except Exception as exc:
+        return _slot_activity_result(
+            SLOT_STATE_UNKNOWN,
+            error=f"active profile lookup failed: {exc}",
+        )
+    if profile is None:
+        return no_server_slot_activity()
+
+    try:
+        url = f"{profile_base_url(profile).rstrip('/')}/slots"
+        response = requests.get(url, timeout=timeout)
+    except Exception as exc:
+        return _slot_probe_failure(
+            profile,
+            f"slot endpoint request failed: {exc}",
+            status_timeout=remaining_timeout(),
+        )
+
+    if response.status_code == 503:
+        return _slot_activity_result(
+            SLOT_STATE_LOADING,
+            profile,
+            error="llama-server is loading",
+        )
+    if response.status_code != 200:
+        return _slot_probe_failure(
+            profile,
+            f"slot endpoint returned HTTP {response.status_code}",
+            status_timeout=remaining_timeout(),
+        )
+
+    try:
+        payload = response.json()
+    except Exception as exc:
+        return _slot_activity_result(
+            SLOT_STATE_UNKNOWN,
+            profile,
+            error=f"slot endpoint returned invalid JSON: {exc}",
+        )
+    return parse_slot_activity_payload(payload, profile)
 
 
 def wait_until_ready(profile: Dict[str, Any], timeout: Optional[int] = None) -> bool:

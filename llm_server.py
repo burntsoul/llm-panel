@@ -4,17 +4,42 @@ from __future__ import annotations
 import time
 import datetime
 import asyncio
-from typing import Optional, Tuple
+import logging
+from typing import Any, Dict, Optional, Tuple
 
 import requests
 
 from config import settings
+import llama_cpp_provider
 from proxmox import get_vm_status, start_vm, shutdown_vm
 from state import get_maintenance_mode
 
 
+logger = logging.getLogger("llm-agent.llm-idle")
+
 _last_activity = datetime.datetime.utcnow()
 _ollama_was_up = False  # Track Ollama state transitions for auto-sync
+_last_cpu_total: Optional[float] = None
+_slot_activity: Dict[str, Any] = {
+    "state": llama_cpp_provider.SLOT_STATE_UNKNOWN,
+    "profile_id": None,
+    "served_model_id": None,
+    "active_slots": 0,
+    "total_slots": 0,
+    "error": "slot activity has not been polled",
+    "checked_at_monotonic": 0.0,
+}
+
+_SLOT_STALE_SECONDS = max(30.0, float(settings.CPU_POLL_INTERVAL_SECONDS) * 3.0)
+_SHUTDOWN_SAFE_SLOT_STATES = {
+    llama_cpp_provider.SLOT_STATE_IDLE,
+    llama_cpp_provider.SLOT_STATE_NO_SERVER,
+}
+_SHUTDOWN_BLOCKING_SLOT_STATES = {
+    llama_cpp_provider.SLOT_STATE_BUSY,
+    llama_cpp_provider.SLOT_STATE_LOADING,
+    llama_cpp_provider.SLOT_STATE_UNKNOWN,
+}
 
 
 def touch_activity() -> None:
@@ -25,6 +50,118 @@ def touch_activity() -> None:
 
 def get_last_activity() -> datetime.datetime:
     return _last_activity
+
+
+def get_llama_cpp_activity_state() -> Dict[str, Any]:
+    """Return the most recently observed managed llama.cpp slot state."""
+    return dict(_slot_activity)
+
+
+def _record_slot_activity(result: Dict[str, Any], checked_at: Optional[float] = None) -> Dict[str, Any]:
+    """Store a slot probe result and log meaningful state/error transitions."""
+    global _slot_activity
+
+    valid_states = _SHUTDOWN_SAFE_SLOT_STATES | _SHUTDOWN_BLOCKING_SLOT_STATES
+    state = result.get("state")
+    if state not in valid_states:
+        result = {
+            **result,
+            "state": llama_cpp_provider.SLOT_STATE_UNKNOWN,
+            "error": result.get("error") or f"invalid slot state: {state!r}",
+        }
+
+    previous = _slot_activity
+    snapshot = {
+        "state": result.get("state"),
+        "profile_id": result.get("profile_id"),
+        "served_model_id": result.get("served_model_id"),
+        "active_slots": int(result.get("active_slots") or 0),
+        "total_slots": int(result.get("total_slots") or 0),
+        "error": result.get("error"),
+        "checked_at_monotonic": time.monotonic() if checked_at is None else float(checked_at),
+    }
+    _slot_activity = snapshot
+
+    transitioned = (
+        previous.get("state") != snapshot["state"]
+        or previous.get("profile_id") != snapshot["profile_id"]
+        or previous.get("active_slots") != snapshot["active_slots"]
+    )
+    if transitioned:
+        logger.info(
+            "llama.cpp slot state transition profile=%s model=%s state=%s active_slots=%d total_slots=%d",
+            snapshot["profile_id"] or "none",
+            snapshot["served_model_id"] or "none",
+            snapshot["state"],
+            snapshot["active_slots"],
+            snapshot["total_slots"],
+        )
+    if snapshot.get("error") and (transitioned or previous.get("error") != snapshot["error"]):
+        logger.warning(
+            "llama.cpp slot probe error profile=%s state=%s active_slots=%d total_slots=%d error=%s",
+            snapshot["profile_id"] or "none",
+            snapshot["state"],
+            snapshot["active_slots"],
+            snapshot["total_slots"],
+            snapshot["error"],
+        )
+    return dict(snapshot)
+
+
+def _slot_activity_is_stale(
+    snapshot: Optional[Dict[str, Any]] = None,
+    now_monotonic: Optional[float] = None,
+) -> bool:
+    current = snapshot or _slot_activity
+    checked_at = float(current.get("checked_at_monotonic") or 0.0)
+    now = time.monotonic() if now_monotonic is None else float(now_monotonic)
+    return checked_at <= 0.0 or now - checked_at > _SLOT_STALE_SECONDS
+
+
+def _slot_activity_blocks_shutdown(
+    snapshot: Optional[Dict[str, Any]] = None,
+    now_monotonic: Optional[float] = None,
+) -> bool:
+    current = snapshot or _slot_activity
+    return (
+        _slot_activity_is_stale(current, now_monotonic)
+        or current.get("state") not in _SHUTDOWN_SAFE_SLOT_STATES
+    )
+
+
+def _format_cpu(total: Optional[float]) -> str:
+    return "unknown" if total is None else f"{total:.1f}"
+
+
+def _log_shutdown_decision(
+    decision: str,
+    reason: str,
+    *,
+    snapshot: Optional[Dict[str, Any]] = None,
+    idle_seconds: Optional[float] = None,
+    cpu_total: Optional[float] = None,
+    lease_count: Optional[int] = None,
+    maintenance: Optional[bool] = None,
+) -> None:
+    current = snapshot or _slot_activity
+    stale = _slot_activity_is_stale(current)
+    logger.info(
+        "LLM VM shutdown decision=%s reason=%s profile=%s model=%s slot_state=%s "
+        "active_slots=%d total_slots=%d slot_stale=%s idle_seconds=%.1f cpu_total=%s "
+        "lease_state=%s maintenance=%s",
+        decision,
+        reason,
+        current.get("profile_id") or "none",
+        current.get("served_model_id") or "none",
+        current.get("state") or llama_cpp_provider.SLOT_STATE_UNKNOWN,
+        int(current.get("active_slots") or 0),
+        int(current.get("total_slots") or 0),
+        stale,
+        max(0.0, idle_seconds or 0.0),
+        _format_cpu(cpu_total),
+        "unknown" if lease_count is None else f"active:{lease_count}",
+        "unknown" if maintenance is None else maintenance,
+    )
 
 
 def detect_ollama_online_transition() -> bool:
@@ -216,61 +353,289 @@ async def ensure_llm_running_and_ready(timeout: int | None = None) -> bool:
     return False
 
 
-async def idle_shutdown_loop() -> None:
-    """
-    Taustasäie, joka tarkkailee LLM:n käyttöä ja sammuttaa LLM-VM:n
-    kun sitä ei ole käytetty pitkään aikaan.
-    
-    Respects active leases:
-    - If any active leases exist, VM stays ON regardless of idle time
-    - If no leases, falls back to traditional idle timeout logic
-    - Maintenance mode disables shutdown
-    """
-    global _last_activity
-    
-    # Import here to avoid circular dependency
+async def poll_llm_activity_once() -> Dict[str, Any]:
+    """Poll managed llama.cpp slots first and aggregate CPU as a supplement."""
+    global _last_cpu_total
+
+    try:
+        result = await asyncio.to_thread(llama_cpp_provider.probe_active_profile_slots, 2.0)
+    except Exception as exc:
+        result = {
+            "state": llama_cpp_provider.SLOT_STATE_UNKNOWN,
+            "profile_id": None,
+            "served_model_id": None,
+            "active_slots": 0,
+            "total_slots": 0,
+            "error": f"slot activity poll failed: {exc}",
+        }
+    if not isinstance(result, dict):
+        result = {
+            "state": llama_cpp_provider.SLOT_STATE_UNKNOWN,
+            "profile_id": None,
+            "served_model_id": None,
+            "active_slots": 0,
+            "total_slots": 0,
+            "error": "slot activity poll returned a non-object result",
+        }
+    snapshot = _record_slot_activity(result)
+
+    try:
+        _last_cpu_total = await asyncio.to_thread(get_llm_server_cpu_total)
+    except Exception:
+        _last_cpu_total = None
+
+    # Loading is active profile-switch/startup work. Unknown is fail-safe blocked
+    # without moving the timer, so shutdown resumes only after a valid probe.
+    if snapshot["state"] in {
+        llama_cpp_provider.SLOT_STATE_BUSY,
+        llama_cpp_provider.SLOT_STATE_LOADING,
+    }:
+        touch_activity()
+    if _last_cpu_total is not None and _last_cpu_total >= settings.CPU_BUSY_THRESHOLD_FOR_IDLE:
+        touch_activity()
+
+    return snapshot
+
+
+async def llm_activity_poller() -> None:
+    """Continuously combine authoritative slot activity with supplemental CPU."""
+    while True:
+        try:
+            await poll_llm_activity_once()
+        except Exception as exc:
+            # Keep polling so an indeterminate state can recover on a later pass.
+            logger.exception("LLM activity poll failed; preserving fail-safe slot state")
+            try:
+                _record_slot_activity(
+                    {
+                        "state": llama_cpp_provider.SLOT_STATE_UNKNOWN,
+                        "profile_id": _slot_activity.get("profile_id"),
+                        "served_model_id": _slot_activity.get("served_model_id"),
+                        "active_slots": 0,
+                        "total_slots": 0,
+                        "error": f"activity poller failed: {exc}",
+                    }
+                )
+            except Exception:
+                logger.exception("Could not record fail-safe LLM slot state")
+        await asyncio.sleep(settings.CPU_POLL_INTERVAL_SECONDS)
+
+
+async def run_idle_shutdown_check() -> bool:
+    """Evaluate and, when every fail-safe permits it, shut down the LLM VM."""
+    global _last_cpu_total
+
+    # Import here to avoid circular dependency.
     from lease import get_lease_manager
-    
+
+    idle = (datetime.datetime.utcnow() - _last_activity).total_seconds()
+    if idle <= settings.LLM_IDLE_SECONDS:
+        return False
+
+    snapshot = get_llama_cpp_activity_state()
+    maintenance = get_maintenance_mode()
+    lease_count: Optional[int]
+    try:
+        lease_count = len(get_lease_manager().get_active_leases())
+    except Exception as exc:
+        lease_count = None
+        _log_shutdown_decision(
+            "inhibited",
+            f"lease state unavailable: {exc}",
+            snapshot=snapshot,
+            idle_seconds=idle,
+            cpu_total=_last_cpu_total,
+            lease_count=lease_count,
+            maintenance=maintenance,
+        )
+        return False
+
+    if maintenance:
+        _log_shutdown_decision(
+            "inhibited",
+            "maintenance mode",
+            snapshot=snapshot,
+            idle_seconds=idle,
+            cpu_total=_last_cpu_total,
+            lease_count=lease_count,
+            maintenance=maintenance,
+        )
+        return False
+
+    if lease_count:
+        _log_shutdown_decision(
+            "inhibited",
+            "active lease",
+            snapshot=snapshot,
+            idle_seconds=idle,
+            cpu_total=_last_cpu_total,
+            lease_count=lease_count,
+            maintenance=maintenance,
+        )
+        return False
+
+    if _slot_activity_blocks_shutdown(snapshot):
+        reason = (
+            "stale slot state"
+            if _slot_activity_is_stale(snapshot)
+            else f"slot state {snapshot.get('state') or llama_cpp_provider.SLOT_STATE_UNKNOWN}"
+        )
+        _log_shutdown_decision(
+            "inhibited",
+            reason,
+            snapshot=snapshot,
+            idle_seconds=idle,
+            cpu_total=_last_cpu_total,
+            lease_count=lease_count,
+            maintenance=maintenance,
+        )
+        return False
+
+    try:
+        vm_status = await asyncio.to_thread(get_vm_status, settings.LLM_VM_ID)
+    except Exception as exc:
+        _log_shutdown_decision(
+            "inhibited",
+            f"LLM VM status unavailable: {exc}",
+            snapshot=snapshot,
+            idle_seconds=idle,
+            cpu_total=_last_cpu_total,
+            lease_count=lease_count,
+            maintenance=maintenance,
+        )
+        return False
+    if vm_status != "running":
+        _log_shutdown_decision(
+            "skipped",
+            f"LLM VM is not running (status={vm_status})",
+            snapshot=snapshot,
+            idle_seconds=idle,
+            cpu_total=_last_cpu_total,
+            lease_count=lease_count,
+            maintenance=maintenance,
+        )
+        return False
+
+    # CPU can only extend activity. A low or unavailable value never proves idle.
+    try:
+        _last_cpu_total = await asyncio.to_thread(get_llm_server_cpu_total)
+    except Exception:
+        _last_cpu_total = None
+    if _last_cpu_total is not None and _last_cpu_total >= settings.CPU_BUSY_THRESHOLD_FOR_IDLE:
+        touch_activity()
+        _log_shutdown_decision(
+            "inhibited",
+            "supplemental CPU activity",
+            snapshot=snapshot,
+            idle_seconds=idle,
+            cpu_total=_last_cpu_total,
+            lease_count=lease_count,
+            maintenance=maintenance,
+        )
+        return False
+
+    # Recheck local holds immediately before the authoritative final slot probe.
+    maintenance = get_maintenance_mode()
+    try:
+        lease_count = len(get_lease_manager().get_active_leases())
+    except Exception as exc:
+        _log_shutdown_decision(
+            "inhibited",
+            f"lease state unavailable before final probe: {exc}",
+            snapshot=snapshot,
+            idle_seconds=idle,
+            cpu_total=_last_cpu_total,
+            lease_count=None,
+            maintenance=maintenance,
+        )
+        return False
+    if maintenance or lease_count:
+        _log_shutdown_decision(
+            "inhibited",
+            "maintenance mode" if maintenance else "active lease before final probe",
+            snapshot=snapshot,
+            idle_seconds=idle,
+            cpu_total=_last_cpu_total,
+            lease_count=lease_count,
+            maintenance=maintenance,
+        )
+        return False
+
+    try:
+        final_result = await asyncio.to_thread(llama_cpp_provider.probe_active_profile_slots, 2.0)
+    except Exception as exc:
+        final_result = {
+            "state": llama_cpp_provider.SLOT_STATE_UNKNOWN,
+            "profile_id": snapshot.get("profile_id"),
+            "served_model_id": snapshot.get("served_model_id"),
+            "active_slots": 0,
+            "total_slots": 0,
+            "error": f"final slot probe failed: {exc}",
+        }
+    snapshot = _record_slot_activity(final_result)
+    if snapshot["state"] in {
+        llama_cpp_provider.SLOT_STATE_BUSY,
+        llama_cpp_provider.SLOT_STATE_LOADING,
+    }:
+        touch_activity()
+
+    idle = (datetime.datetime.utcnow() - _last_activity).total_seconds()
+    if _slot_activity_blocks_shutdown(snapshot):
+        _log_shutdown_decision(
+            "inhibited",
+            f"final slot state {snapshot['state']}",
+            snapshot=snapshot,
+            idle_seconds=idle,
+            cpu_total=_last_cpu_total,
+            lease_count=lease_count,
+            maintenance=maintenance,
+        )
+        return False
+    if idle <= settings.LLM_IDLE_SECONDS:
+        _log_shutdown_decision(
+            "inhibited",
+            "activity refreshed during shutdown evaluation",
+            snapshot=snapshot,
+            idle_seconds=idle,
+            cpu_total=_last_cpu_total,
+            lease_count=lease_count,
+            maintenance=maintenance,
+        )
+        return False
+
+    _log_shutdown_decision(
+        "proceeding",
+        "definitive idle slot state and idle timeout exceeded",
+        snapshot=snapshot,
+        idle_seconds=idle,
+        cpu_total=_last_cpu_total,
+        lease_count=lease_count,
+        maintenance=maintenance,
+    )
+    ok, message = await asyncio.to_thread(shutdown_vm, settings.LLM_VM_ID, wait_stopped=False)
+    if not ok:
+        _log_shutdown_decision(
+            "failed",
+            message or "shutdown request failed",
+            snapshot=snapshot,
+            idle_seconds=idle,
+            cpu_total=_last_cpu_total,
+            lease_count=lease_count,
+            maintenance=maintenance,
+        )
+    return bool(ok)
+
+
+async def idle_shutdown_loop() -> None:
+    """Run the fail-safe LLM VM idle shutdown evaluation once per minute."""
     while True:
         await asyncio.sleep(60)
-
-        if get_maintenance_mode():
-            continue
-
-        if not llm_server_up():
-            continue
-
-        # Check for active leases
-        lease_mgr = get_lease_manager()
-        has_leases = lease_mgr.has_active_leases()
-        
-        if has_leases:
-            # Keep VM running if there are active leases
-            continue
-
-        # No leases; use traditional idle timeout
-        idle = (datetime.datetime.utcnow() - _last_activity).total_seconds()
-        if idle > settings.LLM_IDLE_SECONDS:
-            # käytä lempeää shutdownia (ei force stop)
-            shutdown_vm(settings.LLM_VM_ID, wait_stopped=False)
-            # halutessa voisi lisätä varmistus-stopin myöhemmin
+        try:
+            await run_idle_shutdown_check()
+        except Exception:
+            logger.exception("LLM VM idle shutdown evaluation failed; preserving VM state")
 
 
 async def cpu_activity_poller() -> None:
-    """
-    Pollaa llm-serverin CPU-kuormaa säännöllisesti ja
-    kutsuu touch_activity(), jos kuorma on selvästi ei-idle.
-    Näin idle_shutdown_loop ei laukea, kun LLM:ää käytetään
-    suoraan esimerkiksi VS Codesta.
-
-    (Huoltotilassa ei tarvitse tehdä mitään, mutta poller ei haittaa.)
-    """
-    while True:
-        try:
-            total = await asyncio.to_thread(get_llm_server_cpu_total)
-            if total is not None and total >= settings.CPU_BUSY_THRESHOLD_FOR_IDLE:
-                touch_activity()
-        except Exception:
-            pass
-
-        await asyncio.sleep(settings.CPU_POLL_INTERVAL_SECONDS)
+    """Backward-compatible alias for the unified activity poller."""
+    await llm_activity_poller()

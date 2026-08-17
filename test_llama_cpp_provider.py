@@ -4,7 +4,7 @@ import asyncio
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import app as app_module
 import llama_cpp_provider
@@ -93,6 +93,7 @@ class TestLlamaCppProvider(unittest.TestCase):
         self.assertIn("/models/llama/qwen.gguf", args)
         self.assertIn("--alias", args)
         self.assertIn("qwen-local:planner", args)
+        self.assertEqual(args.count("--slots"), 1)
         self.assertIn("--ctx-size", args)
         self.assertIn("262144", args)
         self.assertIn("--flash-attn", args)
@@ -123,10 +124,145 @@ class TestLlamaCppProvider(unittest.TestCase):
         args = llama_cpp_provider.build_llama_server_args(profile)
 
         self.assertEqual(args[0], "/home/teemu/bin/llama-server-turboquant")
+        self.assertEqual(args.count("--slots"), 1)
         self.assertEqual(
             llama_cpp_provider.profile_binary_path(profile),
             "/home/teemu/bin/llama-server-turboquant",
         )
+
+    def test_profile_rejects_no_slots(self):
+        with self.assertRaisesRegex(ValueError, "--no-slots"):
+            llama_cpp_provider.upsert_profile(
+                {
+                    "served_model_id": "unsafe-local",
+                    "gguf_path": "/models/llama/unsafe.gguf",
+                    "extra_args": ["--no-slots"],
+                }
+            )
+
+    def test_command_builder_rejects_no_slots_from_persisted_profile(self):
+        profile = {
+            "id": "legacy",
+            "served_model_id": "legacy-local",
+            "gguf_path": "/models/llama/legacy.gguf",
+            "extra_args": ["--no-slots=true"],
+        }
+
+        with self.assertRaisesRegex(ValueError, "--no-slots"):
+            llama_cpp_provider.build_llama_server_args(profile)
+
+    def test_command_builder_deduplicates_explicit_slots(self):
+        profile = llama_cpp_provider.upsert_profile(
+            {
+                "served_model_id": "slots-local",
+                "gguf_path": "/models/llama/slots.gguf",
+                "extra_args": ["--slots"],
+            }
+        )
+
+        self.assertEqual(llama_cpp_provider.build_llama_server_args(profile).count("--slots"), 1)
+
+    def test_slot_payload_parser_reports_busy_and_idle(self):
+        profile = {"id": "ling", "served_model_id": "ling-local"}
+
+        busy = llama_cpp_provider.parse_slot_activity_payload(
+            [{"is_processing": False}, {"is_processing": True}],
+            profile,
+        )
+        busy_with_malformed_peer = llama_cpp_provider.parse_slot_activity_payload(
+            [{"is_processing": True}, {"id": 1}],
+            profile,
+        )
+        idle = llama_cpp_provider.parse_slot_activity_payload(
+            [{"is_processing": False}, {"is_processing": False}],
+            profile,
+        )
+
+        self.assertEqual(busy["state"], llama_cpp_provider.SLOT_STATE_BUSY)
+        self.assertEqual(busy["active_slots"], 1)
+        self.assertEqual(busy["total_slots"], 2)
+        self.assertEqual(busy_with_malformed_peer["state"], llama_cpp_provider.SLOT_STATE_BUSY)
+        self.assertEqual(idle["state"], llama_cpp_provider.SLOT_STATE_IDLE)
+        self.assertEqual(idle["active_slots"], 0)
+        self.assertEqual(idle["total_slots"], 2)
+
+    def test_slot_payload_parser_treats_empty_or_malformed_as_unknown(self):
+        for payload in ([], {}, [{"is_processing": "false"}], [{"id": 0}], [None]):
+            with self.subTest(payload=payload):
+                result = llama_cpp_provider.parse_slot_activity_payload(payload)
+                self.assertEqual(result["state"], llama_cpp_provider.SLOT_STATE_UNKNOWN)
+                self.assertTrue(result["error"])
+
+    @patch("llama_cpp_provider.requests.get")
+    @patch("llama_cpp_provider.get_active_profile")
+    def test_slot_probe_reports_loading_for_http_503(self, get_active_profile, get_mock):
+        get_active_profile.return_value = {
+            "id": "ling",
+            "served_model_id": "ling-local",
+            "port": 8082,
+        }
+        get_mock.return_value = Mock(status_code=503)
+
+        result = llama_cpp_provider.probe_active_profile_slots()
+
+        self.assertEqual(result["state"], llama_cpp_provider.SLOT_STATE_LOADING)
+        get_mock.assert_called_once()
+        self.assertEqual(get_mock.call_args.kwargs["timeout"], 2.0)
+
+    @patch("llama_cpp_provider.status_for_profile", return_value={"status": "stopped"})
+    @patch("llama_cpp_provider.requests.get", side_effect=llama_cpp_provider.requests.Timeout("timed out"))
+    @patch("llama_cpp_provider.get_active_profile")
+    def test_slot_probe_reports_no_server_when_process_is_verified_stopped(
+        self,
+        get_active_profile,
+        _get_mock,
+        _status_mock,
+    ):
+        get_active_profile.return_value = {
+            "id": "stale-profile",
+            "served_model_id": "ling-local",
+            "port": 8082,
+        }
+
+        result = llama_cpp_provider.probe_active_profile_slots()
+
+        self.assertEqual(result["state"], llama_cpp_provider.SLOT_STATE_NO_SERVER)
+        self.assertEqual(result["profile_id"], "stale-profile")
+
+    @patch("llama_cpp_provider.status_for_profile", return_value={"status": "running"})
+    @patch("llama_cpp_provider.requests.get")
+    @patch("llama_cpp_provider.get_active_profile")
+    def test_slot_probe_reports_unknown_for_forbidden_or_invalid_json(
+        self,
+        get_active_profile,
+        get_mock,
+        _status_mock,
+    ):
+        get_active_profile.return_value = {
+            "id": "ling",
+            "served_model_id": "ling-local",
+            "port": 8082,
+        }
+        forbidden = Mock(status_code=403)
+        get_mock.return_value = forbidden
+        self.assertEqual(
+            llama_cpp_provider.probe_active_profile_slots()["state"],
+            llama_cpp_provider.SLOT_STATE_UNKNOWN,
+        )
+
+        invalid_json = Mock(status_code=200)
+        invalid_json.json.side_effect = ValueError("bad JSON")
+        get_mock.return_value = invalid_json
+        self.assertEqual(
+            llama_cpp_provider.probe_active_profile_slots()["state"],
+            llama_cpp_provider.SLOT_STATE_UNKNOWN,
+        )
+
+    @patch("llama_cpp_provider.get_active_profile", return_value=None)
+    def test_slot_probe_reports_no_server_without_active_profile(self, _get_active_profile):
+        result = llama_cpp_provider.probe_active_profile_slots()
+
+        self.assertEqual(result["state"], llama_cpp_provider.SLOT_STATE_NO_SERVER)
 
     def test_profile_without_binary_override_inherits_provider_binary(self):
         llama_cpp_provider.update_provider_settings(
