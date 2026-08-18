@@ -229,7 +229,11 @@ class Settings:
 
         # Idle-logiikka
         self.CPU_BUSY_THRESHOLD_FOR_IDLE = _env_float("CPU_BUSY_THRESHOLD_FOR_IDLE", 20.0)  # %
-        self.CPU_POLL_INTERVAL_SECONDS = _env_float("CPU_POLL_INTERVAL_SECONDS", 10.0)      # s
+        self.CPU_POLL_INTERVAL_SECONDS = _env_float("CPU_POLL_INTERVAL_SECONDS", 180.0)     # s
+        self.LLAMA_CPP_SLOT_PROBE_TIMEOUT_SECONDS = _env_float(
+            "LLAMA_CPP_SLOT_PROBE_TIMEOUT_SECONDS",
+            120.0,
+        )
 
         # Boot & idle timeoutit
         self.LLM_BOOT_TIMEOUT = _env_int("LLM_BOOT_TIMEOUT", 180)

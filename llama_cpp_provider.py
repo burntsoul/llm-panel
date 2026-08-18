@@ -1009,7 +1009,9 @@ def _slot_probe_failure(
     )
 
 
-def probe_active_profile_slots(timeout: float = 2.0) -> Dict[str, Any]:
+def probe_active_profile_slots(timeout: Optional[float] = None) -> Dict[str, Any]:
+    if timeout is None:
+        timeout = float(settings.LLAMA_CPP_SLOT_PROBE_TIMEOUT_SECONDS)
     started_at = time.monotonic()
 
     def remaining_timeout() -> float:

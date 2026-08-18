@@ -207,7 +207,10 @@ class TestLlamaCppProvider(unittest.TestCase):
 
         self.assertEqual(result["state"], llama_cpp_provider.SLOT_STATE_LOADING)
         get_mock.assert_called_once()
-        self.assertEqual(get_mock.call_args.kwargs["timeout"], 2.0)
+        self.assertEqual(
+            get_mock.call_args.kwargs["timeout"],
+            llama_cpp_provider.settings.LLAMA_CPP_SLOT_PROBE_TIMEOUT_SECONDS,
+        )
 
     @patch("llama_cpp_provider.status_for_profile", return_value={"status": "stopped"})
     @patch("llama_cpp_provider.requests.get", side_effect=llama_cpp_provider.requests.Timeout("timed out"))

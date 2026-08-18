@@ -43,7 +43,10 @@
 
 1. You stop using the LLM (no UI or VS Code activity).
 2. `llm_activity_poller()` checks the managed llama.cpp profile's `GET /slots`
-   endpoint every `CPU_POLL_INTERVAL_SECONDS` (normally 10 seconds).
+   endpoint every `CPU_POLL_INTERVAL_SECONDS` (normally 3 minutes). Each probe
+   may wait up to `LLAMA_CPP_SLOT_PROBE_TIMEOUT_SECONDS` (normally 2 minutes),
+   allowing a large llama.cpp prefill batch to finish before the slot response
+   is treated as unavailable.
 3. A slot with `is_processing: true`, a loading/profile-switch response, or CPU
    at or above `CPU_BUSY_THRESHOLD_FOR_IDLE` refreshes the activity timer. CPU is
    supplemental: low CPU never proves that llama.cpp is idle.

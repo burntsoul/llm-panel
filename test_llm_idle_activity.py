@@ -177,7 +177,9 @@ class TestLlmIdleActivity(unittest.TestCase):
                     "llm_server.shutdown_vm", return_value=(True, "shutdown requested")
                 ) as shutdown:
                     self.assertTrue(self._run(llm_server.run_idle_shutdown_check()))
-                final_probe.assert_called_once_with(2.0)
+                final_probe.assert_called_once_with(
+                    llm_server.settings.LLAMA_CPP_SLOT_PROBE_TIMEOUT_SECONDS
+                )
                 shutdown.assert_called_once_with(llm_server.settings.LLM_VM_ID, wait_stopped=False)
 
     @patch.object(llm_server.settings, "CPU_BUSY_THRESHOLD_FOR_IDLE", 20.0)

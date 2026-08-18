@@ -358,7 +358,10 @@ async def poll_llm_activity_once() -> Dict[str, Any]:
     global _last_cpu_total
 
     try:
-        result = await asyncio.to_thread(llama_cpp_provider.probe_active_profile_slots, 2.0)
+        result = await asyncio.to_thread(
+            llama_cpp_provider.probe_active_profile_slots,
+            settings.LLAMA_CPP_SLOT_PROBE_TIMEOUT_SECONDS,
+        )
     except Exception as exc:
         result = {
             "state": llama_cpp_provider.SLOT_STATE_UNKNOWN,
@@ -562,7 +565,10 @@ async def run_idle_shutdown_check() -> bool:
         return False
 
     try:
-        final_result = await asyncio.to_thread(llama_cpp_provider.probe_active_profile_slots, 2.0)
+        final_result = await asyncio.to_thread(
+            llama_cpp_provider.probe_active_profile_slots,
+            settings.LLAMA_CPP_SLOT_PROBE_TIMEOUT_SECONDS,
+        )
     except Exception as exc:
         final_result = {
             "state": llama_cpp_provider.SLOT_STATE_UNKNOWN,
