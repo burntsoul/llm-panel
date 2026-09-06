@@ -430,9 +430,22 @@ async def run_idle_shutdown_check() -> bool:
 
     # Import here to avoid circular dependency.
     from lease import get_lease_manager
+    from llm_runtime_manager import get_runtime_scheduler
 
     idle = (datetime.datetime.utcnow() - _last_activity).total_seconds()
     if idle <= settings.LLM_IDLE_SECONDS:
+        return False
+
+    if get_runtime_scheduler().has_work():
+        _log_shutdown_decision(
+            "inhibited",
+            "runtime scheduler has queued, running, or transitional work",
+            snapshot=get_llama_cpp_activity_state(),
+            idle_seconds=idle,
+            cpu_total=_last_cpu_total,
+            lease_count=None,
+            maintenance=get_maintenance_mode(),
+        )
         return False
 
     snapshot = get_llama_cpp_activity_state()

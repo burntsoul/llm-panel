@@ -26,6 +26,14 @@ class TestModelProfiles(unittest.TestCase):
         self.meta_path.write_text(json.dumps(data), encoding="utf-8")
         models.invalidate_model_cache()
 
+    def test_scheduler_capacity_defaults_to_one_and_persists(self):
+        self._write_meta({"gemma4:12b": {"alias": "planner"}})
+        self.assertEqual(models.get_scheduler_capacity("planner"), 1)
+        updated = models.set_scheduler_capacity("planner", 3)
+        models.invalidate_model_cache()
+        self.assertEqual(updated["scheduler_capacity"], 3)
+        self.assertEqual(models.get_scheduler_capacity("gemma4:12b"), 3)
+
     @patch("models.llama_cpp_provider.list_profiles", return_value=[])
     @patch("models.llm_server_up", return_value=True)
     @patch("models.requests.get")

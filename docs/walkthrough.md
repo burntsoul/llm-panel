@@ -9,26 +9,14 @@
    * LO100 power: `off` (or similar).
    * LLM API: `DOWN`.
 4. You type a prompt and click **Send**.
-5. `/chat_stream`:
-
-   * Calls `_touch_activity()`.
-   * Sees `llm_server_up()` = False.
-   * Yields text: “Waking LLM server, please wait…”.
-   * Calls `ensure_llm_running()`:
-
-     * Sends `ipmitool chassis power on` to LO100.
-     * Polls Ollama `/api/tags` until it responds or `LLM_BOOT_TIMEOUT` expires.
-   * Once Ollama responds:
-
-     * Sends `POST /api/generate` to Ollama and starts streaming tokens back.
+5. `/chat_stream` enqueues a target-specific request. The scheduler starts the LLM VM if needed, waits for Ollama indefinitely using finite probes, unloads conflicting targets, preloads the requested model, and then streams the response. A temporary readiness state does not return a 503.
 6. UI shows the answer incrementally, then formats it as Markdown (and LaTeX if any).
 
 ### Scenario B: Normal interactive use
 
-* You send multiple prompts from the UI and/or VS Code.
-* Each message or token chunk:
-
-  * Updates `_last_activity`.
+* You send multiple prompts from the UI and/or VS Code through llm-agent.
+* Same-target work runs up to the configured capacity. Additional work waits FIFO. An earlier request for another target creates a switch barrier, so sustained arrivals cannot starve it.
+* Permits remain occupied until a non-streaming response completes or a stream closes.
 * `idle_shutdown_loop`:
 
   * Checks every minute → sees small idle time → does nothing.
@@ -70,21 +58,9 @@ is inhibited indefinitely until a valid slot response returns. HTTP 503 while a
 profile is loading also inhibits shutdown. This favors preserving in-flight work
 over power savings.
 
-### Scenario D: VS Code uses the LLM directly
+### Scenario D: VS Code uses the scheduled API
 
-1. VS Code (Continue) calls `http://LLM_HOST:11434` directly.
-2. Ollama spins up a model and CPU climbs (e.g. > 50%).
-3. `llm_activity_poller()`:
-
-   * Checks managed llama.cpp slots when a provider profile is active.
-   * Polls Glances `/cpu`.
-   * Sees `total >= CPU_BUSY_THRESHOLD_FOR_IDLE`.
-   * Calls `_touch_activity()`.
-4. `idle_shutdown_loop`:
-
-   * Idle time stays small → **no auto shutdown**.
-5. If you, from the UI, hit “Soft shutdown”:
-
-   * `/power` checks `is_llm_server_busy()`:
-
-     * sees high CPU → refuses to shutdown and tells you the server looks busy.
+1. Configure VS Code/Continue with `http://LLM_AGENT:8000/v1`, never the Ollama or llama-server port.
+2. A request for another model waits while the current generation drains, then the scheduler unloads the old provider/model and verifies the new target.
+3. Queued, running, switching, cancelling, or draining work inhibits VM idle shutdown.
+4. Operators can inspect or recover stuck work from **Settings → Runtime → Queue**.

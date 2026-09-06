@@ -89,6 +89,7 @@ Choose ONE option:
 **Option A: Environment Variables**
 ```bash
 export LLM_AGENT_TOKEN="your-generated-token"
+# Internal upstream address for llm-agent only. Clients use llm-agent port 8000.
 export LLM_BASE_URL="http://192.168.8.33:11434"
 export POWER_MODE="Medium"
 
@@ -106,10 +107,11 @@ LLM_AGENT_TOKEN = "your-generated-token"
 
 ### Step 5: Verify LLM Readiness
 ```bash
-# Test readiness endpoint on LLM VM
-curl -s http://192.168.8.33:11434/api/tags | jq .
+# Test scheduler acceptance through llm-agent
+curl -s http://192.168.8.36:8000/v1/health | jq .
 
-# Should return list of models, not an error
+# Inspect target/queue state through llm-agent
+curl -s http://192.168.8.36:8000/api/runtime/queue | jq .
 ```
 
 ### Step 6: Restart Service
@@ -257,10 +259,10 @@ grep LLM_AGENT_TOKEN llm_secrets.py
 python3 setup_lease_api.py --generate-token
 ```
 
-### Issue: 503 LLM Not Ready
+### Issue: Runtime Work Is Waiting
 ```bash
-# Check readiness endpoint directly
-curl -s http://192.168.8.33:11434/api/tags
+# Check scheduler state through llm-agent
+curl -s http://192.168.8.36:8000/api/runtime/queue | jq .
 
 # Check VM status
 ssh proxmox "qm status 101"

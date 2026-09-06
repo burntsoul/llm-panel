@@ -804,6 +804,38 @@ button:disabled {
   display: block;
 }
 
+#settings-field-grid.runtime-queue-grid {
+  display: block;
+}
+
+.runtime-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.6rem;
+}
+
+.runtime-summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.65rem;
+  border: 1px solid #e5d8c6;
+  border-radius: var(--radius-sm);
+  background: #fff8ee;
+}
+
+.runtime-toolbar, .runtime-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.7rem;
+}
+
+.runtime-table-wrap { overflow-x: auto; }
+.runtime-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.runtime-table th, .runtime-table td { padding: 0.45rem; border-bottom: 1px solid #ece0d0; text-align: left; }
+.runtime-table th { color: var(--muted); }
+
 .provider-panel {
   display: flex;
   flex-direction: column;

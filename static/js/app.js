@@ -53,6 +53,8 @@ let modalCleanup = null;
 let gpuStatusChart = null;
 let gpuStatusWindow = "15m";
 let gpuStatusTimer = null;
+let runtimeQueueTimer = null;
+let runtimeQueueEvents = null;
 let gpuStatusVisibleSeries = {
   gpu_temp_c: true,
   gpu_util_percent: true,
@@ -1596,7 +1598,29 @@ function renderOllamaProviderRows(rows) {
     removeBtn.disabled = row.base_present_now !== true;
     removeBtn.addEventListener("click", () => removeOllamaModel(modelId));
 
-    actions.append(profileBtn, removeProfileBtn, removeBackingBtn, removeBtn);
+    const capacityInput = document.createElement("input");
+    capacityInput.type = "number";
+    capacityInput.min = "1";
+    capacityInput.value = String(row.scheduler_capacity || 1);
+    capacityInput.title = "Scheduler concurrency capacity";
+    capacityInput.style.width = "4rem";
+    const capacityBtn = document.createElement("button");
+    capacityBtn.type = "button";
+    capacityBtn.className = "secondary";
+    capacityBtn.textContent = "Set capacity";
+    capacityBtn.addEventListener("click", async () => {
+      try {
+        await getJson("/api/providers/ollama/scheduler-capacity", {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: modelId, scheduler_capacity: Number(capacityInput.value) }),
+        });
+        setOllamaProviderStatus(`Scheduler capacity for ${modelId} saved.`, false);
+      } catch (err) {
+        setOllamaProviderStatus(`Capacity update failed: ${err}`, true);
+      }
+    });
+
+    actions.append(profileBtn, capacityInput, capacityBtn, removeProfileBtn, removeBackingBtn, removeBtn);
     item.append(name, meta, profileMeta, actions);
     body.appendChild(item);
   });
@@ -2819,6 +2843,121 @@ function buildOllamaProviderSection() {
   refreshOllamaProviderModels();
 }
 
+function renderRuntimeQueueSnapshot(snapshot) {
+  const root = qs("#runtime-queue-panel");
+  if (!root) return;
+  const active = snapshot.active_target;
+  const requestRows = [...(snapshot.running || []), ...(snapshot.queued || [])];
+  const requests = requestRows.length ? requestRows.map((row) => `
+    <tr>
+      <td><code>${escapeHtml(row.request_id)}</code></td>
+      <td>${escapeHtml(row.state)}${row.position ? ` #${row.position}` : ""}</td>
+      <td>${escapeHtml(row.target_key)}</td>
+      <td>${escapeHtml(row.endpoint)}</td>
+      <td>${row.stream ? "yes" : "no"}</td>
+      <td>${escapeHtml(row.client_id)}</td>
+      <td>${Number(row.wait_seconds || 0).toFixed(1)}s / ${row.run_seconds === null ? "—" : `${Number(row.run_seconds || 0).toFixed(1)}s`}</td>
+      <td><button class="danger small" data-runtime-action="cancel_request" data-request-id="${escapeHtml(row.request_id)}">Cancel</button></td>
+    </tr>`).join("") : `<tr><td colspan="8" class="muted">No running or queued requests.</td></tr>`;
+  const targets = (snapshot.targets || []).length ? snapshot.targets.map((row) => `
+    <tr>
+      <td><code>${escapeHtml(row.key)}</code></td>
+      <td>${row.running || 0} / ${row.capacity || 1}</td>
+      <td>${row.queued || 0}</td>
+      <td>${row.draining ? "draining" : (row.paused ? "paused" : "open")}</td>
+      <td class="runtime-actions">
+        <button class="secondary small" data-runtime-action="${row.paused ? "resume_target" : "pause_target"}" data-target-key="${escapeHtml(row.key)}">${row.paused ? "Resume" : "Pause"}</button>
+        <button class="secondary small" data-runtime-action="drain_target" data-target-key="${escapeHtml(row.key)}">Drain</button>
+        <button class="danger small" data-runtime-action="force_stop_target" data-target-key="${escapeHtml(row.key)}">Force stop</button>
+      </td>
+    </tr>`).join("") : `<tr><td colspan="5" class="muted">No known targets.</td></tr>`;
+  const pending = snapshot.pending_switches || [];
+  root.innerHTML = `
+    <div class="runtime-summary">
+      <div><span class="label">Phase</span><strong>${escapeHtml(snapshot.phase || "unknown")}</strong></div>
+      <div><span class="label">Active target</span><strong>${escapeHtml(active ? active.key : "none")}</strong></div>
+      <div><span class="label">Permits</span><strong>${active ? `${active.occupied || 0} / ${active.capacity || 1}` : "0 / 0"}</strong></div>
+      <div><span class="label">Revision</span><strong>${snapshot.revision || 0}</strong></div>
+    </div>
+    <div class="runtime-toolbar">
+      <button class="secondary" data-runtime-action="cancel_queued">Cancel queued</button>
+      <button class="danger" data-runtime-action="emergency_reset">Emergency reset</button>
+    </div>
+    <div class="settings-section-title">Requests</div>
+    <div class="runtime-table-wrap"><table class="runtime-table"><thead><tr><th>ID</th><th>State</th><th>Target</th><th>Endpoint</th><th>Stream</th><th>Client</th><th>Wait / run</th><th></th></tr></thead><tbody>${requests}</tbody></table></div>
+    <div class="settings-section-title">Targets and pending switches</div>
+    <p class="muted">Pending: ${escapeHtml(pending.join(", ") || "none")}</p>
+    <div class="runtime-table-wrap"><table class="runtime-table"><thead><tr><th>Target</th><th>Running / capacity</th><th>Queued</th><th>State</th><th>Controls</th></tr></thead><tbody>${targets}</tbody></table></div>
+    <div class="settings-section-title">Diagnostics</div>
+    <p><b>Last transition:</b> ${escapeHtml(snapshot.last_transition ? JSON.stringify(snapshot.last_transition) : "none")}</p>
+    <p class="status-error"><b>Last error:</b> ${escapeHtml(snapshot.last_error || "none")}</p>
+    <p><b>Warnings:</b> ${escapeHtml((snapshot.warnings || []).join(" | ") || "none")}</p>`;
+  qsa("[data-runtime-action]", root).forEach((button) => button.addEventListener("click", handleRuntimeAction));
+}
+
+async function fetchRuntimeQueue() {
+  try {
+    renderRuntimeQueueSnapshot(await getJson("/api/runtime/queue"));
+  } catch (err) {
+    const root = qs("#runtime-queue-panel");
+    if (root) root.innerHTML = `<p class="status-error">Queue status failed: ${escapeHtml(String(err))}</p>`;
+  }
+}
+
+async function handleRuntimeAction(event) {
+  const button = event.currentTarget;
+  const action = button.dataset.runtimeAction;
+  if (["force_stop_target", "emergency_reset"].includes(action)) {
+    const label = action === "emergency_reset" ? "reset every managed runtime and cancel every request" : `force-stop ${button.dataset.targetKey}`;
+    if (!window.confirm(`Confirm: ${label}?`)) return;
+  }
+  button.disabled = true;
+  try {
+    const result = await getJson("/api/runtime/control", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, request_id: button.dataset.requestId || null, target_key: button.dataset.targetKey || null }),
+    });
+    renderRuntimeQueueSnapshot(result.snapshot);
+  } catch (err) {
+    window.alert(`Runtime action failed: ${err}`);
+    button.disabled = false;
+  }
+}
+
+function buildRuntimeQueueSection() {
+  const grid = qs("#settings-field-grid");
+  if (!grid) return;
+  grid.className = "settings-grid runtime-queue-grid";
+  grid.innerHTML = `<div id="runtime-queue-panel"><p class="muted">Loading queue...</p></div>`;
+  fetchRuntimeQueue();
+}
+
+function syncRuntimeQueueMonitoring(enabled) {
+  if (!enabled) {
+    if (runtimeQueueTimer) window.clearInterval(runtimeQueueTimer);
+    runtimeQueueTimer = null;
+    if (runtimeQueueEvents) runtimeQueueEvents.close();
+    runtimeQueueEvents = null;
+    return;
+  }
+  if (runtimeQueueEvents || runtimeQueueTimer) return;
+  if (window.EventSource) {
+    runtimeQueueEvents = new EventSource("/api/runtime/events");
+    runtimeQueueEvents.addEventListener("snapshot", (event) => {
+      try { renderRuntimeQueueSnapshot(JSON.parse(event.data)); } catch (_err) { /* polling fallback handles it */ }
+    });
+    runtimeQueueEvents.onerror = () => {
+      runtimeQueueEvents.close();
+      runtimeQueueEvents = null;
+      if (activeSettingsSection === "runtime_queue" && !runtimeQueueTimer) {
+        runtimeQueueTimer = window.setInterval(fetchRuntimeQueue, 2000);
+      }
+    };
+  } else {
+    runtimeQueueTimer = window.setInterval(fetchRuntimeQueue, 2000);
+  }
+}
+
 function renderSettingsSection(sectionId) {
   const sections = settingsData && settingsData.sections ? settingsData.sections : {};
   if (!settingsAdvanced && sections[sectionId] && sections[sectionId].advanced) {
@@ -2829,6 +2968,7 @@ function renderSettingsSection(sectionId) {
   const visibleFields = (section.fields || []).filter((field) => settingsAdvanced || !field.advanced);
 
   activeSettingsSection = sectionId;
+  syncRuntimeQueueMonitoring(sectionId === "runtime_queue");
   if (sectionId !== "provider_llama_cpp") {
     syncLlamaCppDownloadPolling();
   }
@@ -2841,6 +2981,16 @@ function renderSettingsSection(sectionId) {
   qsa("[data-settings-section]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.settingsSection === sectionId);
   });
+
+  if (section.custom === "runtime_queue") {
+    buildRuntimeQueueSection();
+    const effectiveWrap = qs("#settings-effective-wrap");
+    if (effectiveWrap) effectiveWrap.classList.add("hidden");
+    setSettingsSaveStatus("Live in-memory scheduler state.");
+    updateSettingsSaveButton(section);
+    syncGpuStatusAutoRefresh();
+    return;
+  }
 
   if (section.custom === "gpu_status") {
     buildGpuStatusSection();
@@ -2883,6 +3033,7 @@ function renderSettingsSection(sectionId) {
   if (grid) {
     grid.classList.remove("gpu-status-grid");
     grid.classList.remove("provider-grid");
+    grid.classList.remove("runtime-queue-grid");
     grid.innerHTML = "";
     if (section.error) {
       const card = document.createElement("div");

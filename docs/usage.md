@@ -30,13 +30,13 @@ Authorization: Bearer <YOUR_TOKEN>
   - `GET /v1/lease/{lease_id}`
   - `POST /v1/lease/{lease_id}/refresh`
   - `POST /v1/lease/{lease_id}/release`
-- Health endpoint with VM and readiness status:
+- Health endpoint with scheduler acceptance, phase, and active-target status:
   - `GET /v1/health`
-- Generic HTTP proxy to upstream LLM (Ollama):
+- Generic HTTP proxy to scheduled Ollama/llama.cpp inference:
   - `GET|POST|PUT|PATCH|DELETE /v1/proxy/{path}`
 - Streaming passthrough supported (SSE / NDJSON).
 
-### OpenAI-compatible direct endpoints
+### llm-agent OpenAI-compatible endpoints
 
 - Models:
   - `GET /v1/models`
@@ -53,10 +53,9 @@ Authorization: Bearer <YOUR_TOKEN>
 ## 4. Recommended Client Flow (Lease + Proxy)
 
 1. Create a lease.
-2. If status is `starting`, wait and retry the target call.
-3. Send LLM requests through `/v1/proxy/...` with `X-Lease-Id`.
-4. Refresh lease for long sessions.
-5. Release lease when done.
+2. Send LLM requests through `/v1/proxy/...` with `X-Lease-Id`. The inference request waits in the scheduler while its target is loaded.
+3. Refresh lease for long sessions.
+4. Release lease when done.
 
 ### 4.1 Create Lease
 
@@ -73,9 +72,7 @@ curl -sS -X POST http://192.168.8.36:8000/v1/lease \
   }'
 ```
 
-Response:
-- `201` + `status=ready` if LLM is ready.
-- `202` + `status=starting` if still warming up.
+Response: `201` with `status=ready`. Creating a lease does not reserve GPU capacity or load a model.
 
 ### 4.2 Proxy a Chat Request
 
@@ -120,7 +117,7 @@ curl -sS -X POST http://192.168.8.36:8000/v1/lease/$LEASE_ID/release \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-## 5. Direct OpenAI-Compatible Usage
+## 5. llm-agent OpenAI-Compatible Usage
 
 Use these when you do not need the generic proxy path.
 
@@ -149,6 +146,7 @@ Notes:
 - Supports `tools`/`tool_choice`.
 - Legacy `functions`/`function_call` are translated for compatibility.
 - Optional `system_prompt` is injected if no system-role message exists.
+- Queue, startup/readiness, and generation waits are unlimited by default. Requests for capacity-one targets serialize automatically.
 
 ### 5.3 Completions (legacy clients, including FIM-style usage)
 
@@ -178,7 +176,6 @@ Notes:
 - `input` supports string or array of strings.
 - Max batch size defaults to `EMBEDDING_MAX_BATCH_SIZE=32`.
 - `encoding_format` supports `float` and `base64`.
-- Embedding responses are cached by model+input.
 
 ### 5.5 Images: Generations
 
@@ -241,7 +238,27 @@ JSON alternative:
 }
 ```
 
-## 6. Health and Troubleshooting
+## 6. Runtime queue and operator controls
+
+The settings UI exposes **Runtime → Queue**. The trusted-LAN APIs are:
+
+- `GET /api/runtime/queue` — sanitized live snapshot (never prompts, bodies, credentials, or response content).
+- `GET /api/runtime/events` — snapshot SSE stream with heartbeats.
+- `POST /api/runtime/control` — `cancel_request`, `cancel_queued`, `pause_target`, `resume_target`, `drain_target`, `force_stop_target`, or `emergency_reset`.
+
+Force-stop and emergency-reset are recovery actions and require confirmation in the UI. Ordinary draining uses graceful shutdown and never escalates to a kill automatically.
+
+Optional settings `SCHEDULER_QUEUE_TIMEOUT_SECONDS`, `SCHEDULER_STARTUP_TIMEOUT_SECONDS`, and `SCHEDULER_GENERATION_TIMEOUT_SECONDS` all default to `0`, meaning infinite.
+
+llama.cpp switching and manual Ollama service recovery require the configured llm-server SSH connection. Ordinary Ollama inference can wait for an already booting service without SSH.
+
+## 7. Coordination boundary
+
+Use only `http://192.168.8.36:8000` from clients. Requests sent directly to ports `11434` or a llama-server profile port are invisible to the scheduler and can cause unsafe GPU contention. llm-agent does not alter firewall rules automatically. ComfyUI is outside text-runtime scheduling in this release and must not run concurrently with managed text workloads.
+
+- Embedding responses are cached by model+input.
+
+## 8. Health and Troubleshooting
 
 Health:
 
@@ -251,16 +268,19 @@ curl -sS http://192.168.8.36:8000/v1/health \
 ```
 
 Common statuses:
+
 - `401`: missing/invalid token (when token auth enabled).
 - `403`: invalid/expired `X-Lease-Id`.
-- `503`: upstream LLM not ready.
-- `504`: proxy timeout to upstream.
+- `409 request_cancelled`: an operator cancelled queued or non-streaming work.
+- `502 runtime_target_error`: a definitive target/startup failure (for example a missing artifact or process exit).
+
+Transient loading/readiness states remain queued and do not return 503.
 
 Timeout guidance for OCR/vision:
 - Set client request timeout to at least the agent's proxy timeout (`PROXY_UPSTREAM_TIMEOUT_SECONDS`, default `300`).
 - For large page tiles or heavy models, increase `PROXY_UPSTREAM_TIMEOUT_SECONDS` and client timeout together.
 
-## 7. Python Example (end-to-end)
+## 9. Python Example (end-to-end)
 
 ```python
 import requests

@@ -1,6 +1,8 @@
 # LLM Agent
 
-LLM Agent is a small control plane for a homelab LLM setup: it manages Proxmox VMs, enforces GPU passthrough exclusivity, and proxies OpenAI-compatible requests to Ollama. It can also proxy OpenAI image generation requests to ComfyUI with on-demand startup.
+LLM Agent is a small control plane for a homelab LLM setup. Its in-process GPU scheduler queues and switches text/embedding workloads between Ollama models and llama.cpp profiles, while Proxmox integration enforces GPU passthrough exclusivity. ComfyUI image generation remains independently managed.
+
+All coordinated inference clients must connect to llm-agent. Direct access to Ollama or llama-server ports is unsupported because it bypasses queueing, capacity accounting, safe model switching, and cancellation.
 
 ## Quick Start
 
@@ -17,8 +19,10 @@ LLM Agent is a small control plane for a homelab LLM setup: it manages Proxmox V
    ```
 3. Run the app:
    ```bash
-   uvicorn app:app --host 0.0.0.0 --port 8000
+   uvicorn app:app --host 0.0.0.0 --port 8000 --workers 1
    ```
+
+The scheduler holds a process lock and intentionally rejects a second worker.
 
 ## Documentation
 
@@ -26,5 +30,5 @@ Start here: `docs/index.md`
 
 Highlights:
 - Overview + setup: `docs/index.md`
-- Lease + proxy API: `docs/lease/reference.md`
-- Deployment checklist: `docs/ops/deployment_checklist.md`
+- Client endpoints, leases, scheduler, and queue controls: `docs/usage.md`
+- Runtime walkthrough: `docs/walkthrough.md`

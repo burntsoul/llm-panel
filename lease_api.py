@@ -11,37 +11,34 @@ Provides:
 from __future__ import annotations
 
 import logging
-import asyncio
 from typing import Optional, Dict, Any
 
 from fastapi import APIRouter, HTTPException, Header, status, Request
 from fastapi.responses import StreamingResponse, JSONResponse, Response
 import httpx
+import json
 
 from config import settings
 from lease import get_lease_manager, Lease
-from llm_server import (
-    ensure_llm_running_and_ready,
-    llm_server_up,
-    is_llm_ready,
-    wait_for_llm_ready,
-    touch_activity,
-)
+from llm_server import touch_activity
+# Compatibility exports for older integrations that monkeypatch these names.
+# Inference and lease creation no longer call either helper.
+from llm_server import ensure_llm_running_and_ready, is_llm_ready
 from proxmox import get_vm_status
 from auth import verify_token
+from llm_runtime_backends import resolve_runtime_target
+from llm_runtime_manager import (
+    RuntimeRequestCancelled,
+    RuntimeTargetError,
+    cancelled_error_payload,
+    get_runtime_scheduler,
+    sse_cancelled_payload,
+)
 
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1")
-
-# Global lock to ensure only one warmup sequence runs at a time
-_warmup_lock = asyncio.Lock()
-_warmup_status: Dict[str, Any] = {
-    "in_progress": False,
-    "result": None,  # True if successful, False if failed
-}
-
 
 _RESPONSE_HOP_BY_HOP_HEADERS = {
     "connection",
@@ -91,35 +88,6 @@ def _sanitize_upstream_response_headers(headers: Dict[str, str]) -> Dict[str, st
     }
 
 
-async def _ensure_llm_ready_concurrent(timeout: int | None = None) -> bool:
-    """
-    Ensure LLM VM is running and ready.
-    Only one warmup sequence runs at a time; others wait for result.
-
-    Args:
-        timeout: Warmup timeout in seconds
-
-    Returns:
-        True if LLM is ready, False otherwise
-    """
-    global _warmup_status
-
-    async with _warmup_lock:
-        # If already in progress, just wait
-        if _warmup_status["in_progress"]:
-            # This shouldn't happen with the lock, but just in case
-            return _warmup_status.get("result", False)
-
-        _warmup_status["in_progress"] = True
-        try:
-            # First ensure VM is running
-            ok = await ensure_llm_running_and_ready(timeout)
-            _warmup_status["result"] = ok
-            return ok
-        finally:
-            _warmup_status["in_progress"] = False
-
-
 # ============================================================================
 # Lease Endpoints
 # ============================================================================
@@ -137,14 +105,13 @@ async def create_lease(
 
     Returns: {
         "lease_id": string,
-        "status": "starting" | "ready",
+        "status": "ready",
         "llm_base_url": string,
-        "retry_after_ms": int (if status is "starting"),
         "message": string
     }
 
-    The status is "starting" if LLM is warming up, "ready" if it's operational.
-    For "starting", the client should retry after retry_after_ms.
+    Lease creation is resource-free. Model selection, queueing and startup happen
+    on the subsequent inference request.
     """
     # Auth
     token = _extract_token(authorization)
@@ -175,37 +142,19 @@ async def create_lease(
 
     lease_mgr = get_lease_manager()
 
-    # Start LLM warmup (non-blocking, concurrent)
-    warmup_ok = await _ensure_llm_ready_concurrent(
-        settings.LLM_READINESS_TIMEOUT
-    )
-
     # Create or update lease
     lease = lease_mgr.create_lease(client_id, purpose, ttl_seconds)
     touch_activity()
 
-    if warmup_ok:
-        return JSONResponse(
-            status_code=status.HTTP_201_CREATED,
-            content={
-                "lease_id": lease.lease_id,
-                "status": "ready",
-                "llm_base_url": settings.LLM_BASE_URL,
-                "message": "LLM is ready",
-            },
-        )
-    else:
-        # LLM is still starting or failed
-        return JSONResponse(
-            status_code=status.HTTP_202_ACCEPTED,
-            content={
-                "lease_id": lease.lease_id,
-                "status": "starting",
-                "llm_base_url": settings.LLM_BASE_URL,
-                "retry_after_ms": 5000,
-                "message": "LLM is starting, please retry",
-            },
-        )
+    return JSONResponse(
+        status_code=status.HTTP_201_CREATED,
+        content={
+            "lease_id": lease.lease_id,
+            "status": "ready",
+            "llm_base_url": str(request.base_url).rstrip("/"),
+            "message": "Lease is ready; model loading occurs on the inference request",
+        },
+    )
 
 
 @router.get("/lease/{lease_id}")
@@ -386,19 +335,21 @@ async def health_check(authorization: Optional[str] = Header(None)):
     except Exception as e:
         vm_status = f"unknown ({e})"
 
-    # LLM readiness
-    llm_ready = is_llm_ready()
+    scheduler_snapshot = get_runtime_scheduler().snapshot()
+    llm_ready = bool(scheduler_snapshot.get("accepting"))
 
     # Active leases
     lease_mgr = get_lease_manager()
     active_leases = len(lease_mgr.get_active_leases())
 
-    ok = llm_ready and vm_status == "running"
+    ok = llm_ready
     return {
         "ok": ok,
         "vm_state": vm_status,
         "llm_ready": llm_ready,
         "active_leases": active_leases,
+        "scheduler_phase": scheduler_snapshot.get("phase"),
+        "active_target": scheduler_snapshot.get("active_target"),
         "message": "All systems operational" if ok else "System degraded",
     }
 
@@ -426,21 +377,6 @@ async def _proxy_forward(
     Returns:
         Response (streaming or JSON)
     """
-    # Ensure LLM is ready
-    llm_ready = is_llm_ready()
-    if not llm_ready:
-        logger.warning(
-            f"Proxy request for {path} failed: LLM not ready "
-            f"(lease_id={lease_id})"
-        )
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="LLM server not ready",
-        )
-
-    # Construct target URL
-    target_url = f"{settings.LLM_BASE_URL}{path}"
-
     # Read request body if present
     body = None
     if method.upper() in ("POST", "PUT", "PATCH"):
@@ -449,6 +385,40 @@ async def _proxy_forward(
         except Exception as e:
             logger.error(f"Failed to read proxy request body: {e}")
             body = b""
+
+    normalized = "/" + path.lstrip("/")
+    inference_paths = {
+        "/api/generate": "generate",
+        "/api/chat": "generate",
+        "/api/embed": "embed",
+        "/api/embeddings": "embed",
+        "/v1/chat/completions": "generate",
+        "/v1/completions": "generate",
+        "/v1/responses": "generate",
+        "/v1/embeddings": "embed",
+    }
+    workload = inference_paths.get(normalized.rstrip("/"))
+    target = None
+    if workload:
+        try:
+            payload = json.loads((body or b"").decode("utf-8"))
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="Inference proxy body must be JSON") from exc
+        model = payload.get("model") if isinstance(payload, dict) else None
+        if not isinstance(model, str) or not model.strip():
+            raise HTTPException(status_code=400, detail="Inference proxy requests require a model")
+        try:
+            target, _public, upstream = resolve_runtime_target(model, workload)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if target.provider == "llama_cpp" and normalized.startswith("/api/"):
+            raise HTTPException(status_code=400, detail="llama.cpp profiles require an OpenAI-compatible proxy path")
+        payload["model"] = upstream
+        if target.provider == "ollama":
+            payload["keep_alive"] = -1
+        body = json.dumps(payload).encode("utf-8")
+
+    target_url = f"{(target.base_url if target else settings.LLM_BASE_URL).rstrip('/')}{normalized}"
 
     # Forward headers (skip hop-by-hop and auth headers)
     skip_headers = {
@@ -469,57 +439,99 @@ async def _proxy_forward(
         f"(lease_id={lease_id})"
     )
 
+    permit = None
+    client = httpx.AsyncClient(timeout=None)
+    response = None
     try:
-        async with httpx.AsyncClient(timeout=settings.PROXY_UPSTREAM_TIMEOUT_SECONDS) as client:
-            response = await client.request(
-                method=method,
-                url=target_url,
-                headers=headers,
-                content=body,
+        if target is not None:
+            permit = await get_runtime_scheduler().acquire(
+                target,
+                endpoint=f"/v1/proxy{normalized}",
+                client_id=(request.headers.get("x-client-id") or lease_id or (request.client.host if request.client else "unknown")),
+                stream=bool(workload and json.loads((body or b"{}").decode("utf-8")).get("stream")),
+            )
+        built = client.build_request(method=method, url=target_url, headers=headers, content=body)
+        response = await (permit.run(client.send(built, stream=True)) if permit else client.send(built, stream=True))
+
+        if response.status_code >= 400:
+            logger.warning("Proxy upstream non-2xx response path=%s status=%s", path, response.status_code)
+        touch_activity()
+
+        # Handle streaming responses (e.g., from /v1/chat/completions with stream=true)
+        sanitized_headers = _sanitize_upstream_response_headers(dict(response.headers))
+        content_type = response.headers.get("content-type", "")
+        if "text/event-stream" in content_type or "application/x-ndjson" in content_type:
+            async def generate():
+                runtime_error = None
+                try:
+                    iterator = response.aiter_bytes().__aiter__()
+                    while True:
+                        try:
+                            chunk = await (permit.run(iterator.__anext__()) if permit else iterator.__anext__())
+                        except StopAsyncIteration:
+                            break
+                        yield chunk
+                except RuntimeRequestCancelled as exc:
+                    if "text/event-stream" in content_type:
+                        yield sse_cancelled_payload(exc)
+                    else:
+                        yield json.dumps(cancelled_error_payload(exc)).encode("utf-8") + b"\n"
+                except (RuntimeTargetError, httpx.HTTPError) as exc:
+                    runtime_error = str(exc)
+                    payload = {"error": {"message": str(exc), "type": "runtime_target_error"}}
+                    if "text/event-stream" in content_type:
+                        yield b"data: " + json.dumps(payload).encode("utf-8") + b"\n\ndata: [DONE]\n\n"
+                    else:
+                        yield json.dumps(payload).encode("utf-8") + b"\n"
+                finally:
+                    await response.aclose()
+                    await client.aclose()
+                    if permit:
+                        await permit.release(error=runtime_error)
+            return StreamingResponse(
+                generate(), status_code=response.status_code,
+                headers=sanitized_headers, media_type=sanitized_headers.get("content-type"),
             )
 
-            if response.status_code >= 400:
-                try:
-                    preview = response.content[:300].decode("utf-8", errors="replace")
-                except Exception:
-                    preview = "<unable to decode upstream body preview>"
-                logger.warning(
-                    "Proxy upstream non-2xx response path=%s status=%s body_preview=%r",
-                    path,
-                    response.status_code,
-                    preview,
-                )
+        content = await (permit.run(response.aread()) if permit else response.aread())
+        result = Response(content=content, status_code=response.status_code, headers=sanitized_headers)
+        await response.aclose()
+        await client.aclose()
+        if permit:
+            await permit.release()
+        return result
 
-            # Touch activity
-            touch_activity()
-
-            # Handle streaming responses (e.g., from /v1/chat/completions with stream=true)
-            sanitized_headers = _sanitize_upstream_response_headers(dict(response.headers))
-            if (
-                "text/event-stream" in response.headers.get("content-type", "")
-                or "application/x-ndjson" in response.headers.get("content-type", "")
-            ):
-                return StreamingResponse(
-                    response.aiter_bytes(),
-                    status_code=response.status_code,
-                    headers=sanitized_headers,
-                    media_type=sanitized_headers.get("content-type"),
-                )
-            else:
-                # Non-streaming response
-                return Response(
-                    content=response.content,
-                    status_code=response.status_code,
-                    headers=sanitized_headers,
-                )
-
+    except RuntimeRequestCancelled as exc:
+        if response is not None:
+            await response.aclose()
+        await client.aclose()
+        if permit:
+            await permit.release()
+        return JSONResponse(status_code=409, content=cancelled_error_payload(exc))
+    except RuntimeTargetError as exc:
+        if response is not None:
+            await response.aclose()
+        await client.aclose()
+        if permit:
+            await permit.release(error=str(exc))
+        return JSONResponse(status_code=502, content={"error": {"message": str(exc), "type": "runtime_target_error"}})
     except httpx.TimeoutException:
+        if response is not None:
+            await response.aclose()
+        await client.aclose()
+        if permit:
+            await permit.release(error="upstream timeout")
         logger.error(f"Proxy timeout for {target_url} (lease_id={lease_id})")
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail="LLM server request timeout",
         )
     except httpx.HTTPError as e:
+        if response is not None:
+            await response.aclose()
+        await client.aclose()
+        if permit:
+            await permit.release(error=str(e))
         logger.error(
             f"Proxy HTTP error for {target_url} (lease_id={lease_id}): {e}"
         )

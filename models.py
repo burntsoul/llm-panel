@@ -321,6 +321,31 @@ def delete_model_alias(model_name: str) -> Optional[Dict[str, Any]]:
     return current
 
 
+def get_scheduler_capacity(public_model: str) -> int:
+    """Return the persistent scheduler capacity for an Ollama model."""
+    raw_name = public_name_to_raw_model(str(public_model or "").strip())
+    value = _load_meta().get(raw_name, {}).get("scheduler_capacity", 1)
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return 1
+
+
+def set_scheduler_capacity(public_model: str, capacity: int) -> Dict[str, Any]:
+    raw_name = public_name_to_raw_model(str(public_model or "").strip())
+    if not raw_name:
+        raise ValueError("model is required")
+    capacity = int(capacity)
+    if capacity < 1:
+        raise ValueError("scheduler_capacity must be at least one")
+    meta = _load_meta().copy()
+    current = meta.get(raw_name, {}).copy()
+    current["scheduler_capacity"] = capacity
+    meta[raw_name] = current
+    _write_meta(meta)
+    return current
+
+
 def get_all_model_aliases() -> Dict[str, str]:
     """
     Return a mapping of {model_name: alias} for all models that have an alias configured.
@@ -563,6 +588,7 @@ def get_ollama_provider_model_status() -> List[Dict[str, Any]]:
             "profile": profile if profile["enabled"] else None,
             "present_now": present,
             "base_present_now": base_present,
+            "scheduler_capacity": get_scheduler_capacity(name),
             "backing_present": backing_present,
             "alias": alias,
             "display_id": alias or name,

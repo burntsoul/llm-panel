@@ -1,4 +1,6 @@
-# Lease + Proxy API - Implementation Summary
+# Lease + Proxy API - Historical Implementation Notes
+
+> This file describes the original lease implementation. For current scheduler behavior and supported client examples, use [../usage.md](../usage.md). Lease creation no longer warms a model; inference queues through llm-agent, and direct provider ports are unsupported.
 
 ## Overview
 
@@ -144,6 +146,7 @@ python3 setup_lease_api.py --generate-token
 Option A - Set environment variables:
 ```bash
 export LLM_AGENT_TOKEN="<generated-token>"
+# Internal upstream address for llm-agent only. Clients use llm-agent port 8000.
 export LLM_BASE_URL="http://192.168.8.33:11434"
 export POWER_MODE="Medium"
 ```

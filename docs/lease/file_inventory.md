@@ -1,4 +1,6 @@
-# Lease + Proxy API Implementation - Complete File List
+# Lease + Proxy API - Historical File Inventory
+
+> This is an inventory of the original lease rollout. See [../usage.md](../usage.md) for current scheduler behavior. Direct provider access is unsupported and lease creation no longer performs warmup.
 
 ## New Files Created
 

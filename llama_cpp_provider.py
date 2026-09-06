@@ -815,7 +815,7 @@ def cleanup_llama_cpp_runtime(port: Optional[int] = None) -> Dict[str, Any]:
     return {"ok": True, "message": output or "cleaned"}
 
 
-def start_profile(profile_id: str) -> Dict[str, Any]:
+def start_profile(profile_id: str, *, cleanup_runtime: bool = True) -> Dict[str, Any]:
     profile = find_profile(profile_id)
     if not profile:
         raise ValueError("profile not found")
@@ -823,12 +823,13 @@ def start_profile(profile_id: str) -> Dict[str, Any]:
 
     store = _load_store()
     active_id = store.get("active_profile_id")
-    if active_id and active_id != profile_id:
+    if cleanup_runtime and active_id and active_id != profile_id:
         try:
             stop_profile(active_id)
         except Exception:
             pass
-    cleanup_llama_cpp_runtime(port=int(profile.get("port") or cfg.get("default_port") or 8081))
+    if cleanup_runtime:
+        cleanup_llama_cpp_runtime(port=int(profile.get("port") or cfg.get("default_port") or 8081))
 
     args = build_llama_server_args(profile, cfg)
     runtime_dir = str(cfg.get("runtime_dir")).rstrip("/")
@@ -841,8 +842,8 @@ def start_profile(profile_id: str) -> Dict[str, Any]:
     command = shlex.join(args)
     remote = (
         "mkdir -p {runtime_dir} {cache_dir} {slot_cache_path} || exit 10; "
-        "test -x {binary} || exit 11; "
-        "test -f {model} || exit 12; "
+        "test -x {binary} || {{ echo 'llama-server binary is missing or not executable: {binary}'; exit 11; }}; "
+        "test -f {model} || {{ echo 'GGUF model artifact is missing: {model}'; exit 12; }}; "
         "nohup {command} > {log} 2>&1 & echo $! > {pid}; cat {pid}"
     ).format(
         runtime_dir=shlex.quote(runtime_dir),
@@ -901,6 +902,123 @@ def stop_profile(profile_id: str) -> Dict[str, Any]:
             item["status"] = "stopped"
     _write_store(store)
     return status_for_profile(find_profile(profile_id) or profile)
+
+
+def force_stop_profile(profile_id: str) -> Dict[str, Any]:
+    """Force-stop only processes verified to belong to one profile."""
+    profile = find_profile(profile_id)
+    if not profile:
+        raise ValueError("profile not found")
+    cfg = get_provider_settings()
+    pid_file = pid_path(profile, cfg)
+    model = str(profile.get("gguf_path") or "")
+    port = int(profile.get("port") or cfg.get("default_port") or 8081)
+    remote = (
+        "pidfile={pid}; model={model}; pids=''; "
+        "if [ -f \"$pidfile\" ]; then pids=$(cat \"$pidfile\" 2>/dev/null); fi; "
+        "if command -v fuser >/dev/null 2>&1; then pids=\"$pids $(fuser -n tcp {port} 2>/dev/null)\"; "
+        "elif command -v ss >/dev/null 2>&1; then pids=\"$pids $(ss -ltnp 2>/dev/null | sed -n 's/.*:{port} .*pid=\\([0-9][0-9]*\\).*/\\1/p')\"; fi; "
+        "for process_id in $pids; do "
+        "if [ -n \"$process_id\" ] && kill -0 \"$process_id\" 2>/dev/null && "
+        "tr '\\0' ' ' < /proc/$process_id/cmdline 2>/dev/null | grep -F -- \"$model\" >/dev/null 2>&1; then "
+        "kill -TERM \"$process_id\" 2>/dev/null || true; sleep 1; "
+        "kill -0 \"$process_id\" 2>/dev/null && kill -KILL \"$process_id\" 2>/dev/null || true; fi; done; "
+        "rm -f \"$pidfile\"; echo stopped"
+    ).format(pid=shlex.quote(pid_file), model=shlex.quote(model), port=port)
+    ok, output = run_ssh(remote)
+    if not ok:
+        raise RuntimeError(output or "profile force stop failed")
+    mark_profile_stopped(profile_id)
+    return status_for_profile(find_profile(profile_id) or profile)
+
+
+def request_graceful_stop(profile_id: str) -> Dict[str, Any]:
+    """Send SIGTERM to one verified llama-server PID without escalating."""
+    profile = find_profile(profile_id)
+    if not profile:
+        raise ValueError("profile not found")
+    cfg = get_provider_settings()
+    pid_file = pid_path(profile, cfg)
+    model = str(profile.get("gguf_path") or "")
+    remote = (
+        "pidfile={pid}; model={model}; "
+        "if [ ! -f \"$pidfile\" ]; then echo already-stopped; exit 0; fi; "
+        "pid=$(cat \"$pidfile\" 2>/dev/null); "
+        "if [ -z \"$pid\" ] || ! kill -0 \"$pid\" 2>/dev/null; then rm -f \"$pidfile\"; echo already-stopped; exit 0; fi; "
+        "tr '\\0' ' ' < /proc/$pid/cmdline | grep -F -- \"$model\" >/dev/null 2>&1 || exit 13; "
+        "kill -TERM \"$pid\"; echo stop-requested"
+    ).format(pid=shlex.quote(pid_file), model=shlex.quote(model))
+    ok, output = run_ssh(remote)
+    if not ok:
+        raise RuntimeError(output or "profile graceful stop request failed")
+    _set_profile_status(profile_id, "stopping")
+    return {**profile, "status": "stopping", "message": output}
+
+
+def finalize_graceful_stop(profile_id: str) -> None:
+    """Persist stopped state after the scheduler has verified process exit."""
+    profile = find_profile(profile_id)
+    if profile:
+        ok, output = run_ssh(f"rm -f {shlex.quote(pid_path(profile))}")
+        if not ok:
+            raise RuntimeError(output or "failed to remove stopped llama.cpp PID file")
+    store = _load_store()
+    if store.get("active_profile_id") == profile_id:
+        store["active_profile_id"] = None
+    for item in store["profiles"]:
+        if item.get("id") == profile_id:
+            item["status"] = "stopped"
+            item.pop("last_error", None)
+    _write_store(store)
+
+
+def mark_profile_running(profile_id: str) -> None:
+    store = _load_store()
+    store["active_profile_id"] = profile_id
+    for item in store["profiles"]:
+        if item.get("id") == profile_id:
+            item["status"] = "running"
+            item.pop("last_error", None)
+    _write_store(store)
+
+
+def mark_profile_stopped(profile_id: str) -> None:
+    """Reconcile persisted state when the host is confirmed powered off."""
+    _set_profile_status(profile_id, "stopped")
+
+
+def profile_port_state(profile: Dict[str, Any], timeout: Optional[float] = None) -> Optional[bool]:
+    """Return True when the profile port is listening, False when free, None on probe failure."""
+    port = int(profile.get("port") or get_provider_settings().get("default_port") or 8081)
+    remote = (
+        "if command -v ss >/dev/null 2>&1; then "
+        "ss -ltn 2>/dev/null | awk '{print $4}' | grep -E '[:.]%s$' >/dev/null && echo listening || echo free; "
+        "elif command -v fuser >/dev/null 2>&1; then "
+        "fuser -n tcp %s >/dev/null 2>&1 && echo listening || echo free; "
+        "else exit 14; fi"
+    ) % (port, port)
+    ok, output = run_ssh(remote, timeout=timeout)
+    if not ok:
+        return None
+    return "listening" in output
+
+
+def request_graceful_port_stop(profile: Dict[str, Any]) -> None:
+    """SIGTERM a llama-server listener matching this profile's model; never SIGKILL."""
+    port = int(profile.get("port") or get_provider_settings().get("default_port") or 8081)
+    model = str(profile.get("gguf_path") or "")
+    remote = (
+        "pids=''; "
+        "if command -v fuser >/dev/null 2>&1; then pids=$(fuser -n tcp {port} 2>/dev/null); "
+        "elif command -v ss >/dev/null 2>&1; then pids=$(ss -ltnp 2>/dev/null | sed -n 's/.*:{port} .*pid=\\([0-9][0-9]*\\).*/\\1/p'); fi; "
+        "matched=0; for pid in $pids; do "
+        "if tr '\\0' ' ' < /proc/$pid/cmdline 2>/dev/null | grep -F -- {model} >/dev/null 2>&1; then "
+        "kill -TERM \"$pid\" || exit 16; matched=1; fi; done; "
+        "[ \"$matched\" = 1 ] || exit 15; echo stop-requested"
+    ).format(port=port, model=shlex.quote(model))
+    ok, output = run_ssh(remote)
+    if not ok:
+        raise RuntimeError(output or f"port {port} is occupied by an unrecognized process")
 
 
 def restart_profile(profile_id: str) -> Dict[str, Any]:

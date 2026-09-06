@@ -240,6 +240,14 @@ class Settings:
         self.LLM_POLL_INTERVAL = _env_float("LLM_POLL_INTERVAL", 5.0)
         self.LLM_IDLE_SECONDS = _env_int("LLM_IDLE_SECONDS", 3600)
 
+        # Central runtime scheduler. Zero means no overall deadline; individual
+        # network/SSH probes still use short per-attempt timeouts.
+        self.SCHEDULER_QUEUE_TIMEOUT_SECONDS = _conf_int("SCHEDULER_QUEUE_TIMEOUT_SECONDS", 0)
+        self.SCHEDULER_STARTUP_TIMEOUT_SECONDS = _conf_int("SCHEDULER_STARTUP_TIMEOUT_SECONDS", 0)
+        self.SCHEDULER_GENERATION_TIMEOUT_SECONDS = _conf_int("SCHEDULER_GENERATION_TIMEOUT_SECONDS", 0)
+        self.OLLAMA_SERVICE_NAME = _conf("OLLAMA_SERVICE_NAME", "ollama.service")
+        self.OLLAMA_SYSTEMCTL_PATH = _conf("OLLAMA_SYSTEMCTL_PATH", "/usr/bin/systemctl")
+
         # Huoltotila (ajastukset pois)
         self.STATE_PATH = _env("STATE_PATH", str(Path(__file__).with_name("state.json")))
         self.MAINTENANCE_DEFAULT = _env_bool("MAINTENANCE_DEFAULT", False)

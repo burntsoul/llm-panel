@@ -13,14 +13,14 @@
 
 ## Overview
 
-The Lease + Proxy API enables external applications to safely use the LLM server (Ollama) with automatic power management:
+The Lease + Proxy API enables external applications to safely use Ollama and llama.cpp through llm-agent with automatic power management:
 
 1. **Lease System**: Request a time-limited lease to use the LLM
-2. **Auto Startup**: VM powers on automatically when needed
-3. **Readiness**: System waits until LLM is fully operational
+2. **Resource-free Lease**: Lease creation returns immediately without selecting a GPU model
+3. **Scheduled Readiness**: The inference request queues while the selected runtime is prepared
 4. **Activity Tracking**: Keeps VM on while leases are active
 5. **HTTP Proxy**: Forward any HTTP request to the LLM server
-6. **Concurrent Requests**: Multiple clients can use the system simultaneously
+6. **Concurrent Requests**: Per-target capacity and FIFO switch barriers coordinate clients
 
 ## Authentication
 
@@ -54,30 +54,22 @@ export LLM_AGENT_TOKEN="your-secret-token-here"
 
 ### Optional Settings (with defaults)
 ```bash
-# Internal LLM server URL (used for proxy and readiness)
+# Internal upstream URL used only by llm-agent; clients must use llm-agent port 8000
 # Default: http://192.168.8.33:11434
 export LLM_BASE_URL="http://192.168.8.33:11434"
-
-# Endpoint to check LLM readiness
-# For Ollama: /api/tags or /api/version
-# Default: /api/tags
-export LLM_READINESS_PATH="/api/tags"
 
 # Default TTL for new leases (seconds)
 # Default: 3600 (1 hour)
 export LEASE_DEFAULT_TTL="3600"
 
-# How long to wait for LLM to become ready (seconds)
-# Default: 120
-export LLM_READINESS_TIMEOUT="120"
+# Scheduler deadlines; zero disables the overall deadline
+export SCHEDULER_QUEUE_TIMEOUT_SECONDS="0"
+export SCHEDULER_STARTUP_TIMEOUT_SECONDS="0"
+export SCHEDULER_GENERATION_TIMEOUT_SECONDS="0"
 
 # Upstream timeout for /v1/proxy/* requests (seconds)
 # Default: 300
 export PROXY_UPSTREAM_TIMEOUT_SECONDS="300"
-
-# Polling interval when checking readiness (seconds)
-# Default: 2.0
-export LLM_READINESS_POLL_INTERVAL="2.0"
 
 # Idle shutdown mode: "Off", "Medium" (2h), or "High" (30min)
 # Default: Medium
@@ -136,23 +128,12 @@ Each call creates a new lease. Use refresh to extend an existing lease.
 {
   "lease_id": "550e8400-e29b-41d4-a716-446655440000",
   "status": "ready",
-  "llm_base_url": "http://192.168.8.33:11434",
-  "message": "LLM is ready"
+  "llm_base_url": "http://192.168.8.36:8000",
+  "message": "Lease is ready; model loading occurs on the inference request"
 }
 ```
 
-**Response (202 Starting)**:
-```json
-{
-  "lease_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "starting",
-  "llm_base_url": "http://192.168.8.33:11434",
-  "retry_after_ms": 5000,
-  "message": "LLM is starting, please retry"
-}
-```
-
-If you keep receiving 202, check `/v1/health` and the llm-agent logs.
+Lease creation does not reserve or load a model. The later inference request queues for its target and waits for capacity/readiness.
 
 ### 2. Get Lease - GET /v1/lease/{lease_id}
 
@@ -211,7 +192,7 @@ Auth is required only when `LLM_AGENT_TOKEN` is set.
 ### 6. Proxy - {GET|POST|PUT|PATCH|DELETE} /v1/proxy/{path}
 
 Forwards requests to the LLM with optional `X-Lease-Id` header.
-The proxy does not start the LLM VM; call `/v1/lease` first to warm up.
+Inference paths select and prepare their model through the runtime scheduler; a lease does not warm a model.
 If `X-Lease-Id` is provided, it must be valid or the proxy returns 403.
 
 ### 7. Image Generation - POST /v1/images/generations
@@ -322,7 +303,7 @@ BASE = "http://localhost:8000"
 TOKEN = "your-token"
 headers = {"Authorization": f"Bearer {TOKEN}"}
 
-# Create lease (returns 201 if ready or 202 if still warming)
+# Create a resource-free lease (always returns 201 ready)
 response = requests.post(
     f"{BASE}/v1/lease",
     json={"client_id": "app", "purpose": "chat", "ttl_seconds": 3600},
@@ -348,11 +329,11 @@ requests.post(f"{BASE}/v1/lease/{lease_id}/release", headers=headers)
 - Verify token matches `LLM_AGENT_TOKEN` env var
 - Generate new token: `python3 setup_lease_api.py --generate-token`
 
-### 503 LLM Not Ready
-- Call `POST /v1/lease` first to warm up the VM
-- Check readiness: `curl http://192.168.8.33:11434/api/tags`
+### Runtime Work Is Waiting
+- Check scheduler state: `curl http://192.168.8.36:8000/api/runtime/queue`
+- Check acceptance health: `curl http://192.168.8.36:8000/v1/health`
 - Verify VM is running: `qm status 101`
-- Check network: `ping 192.168.8.33`
+- Leave client timeouts disabled for intentionally long queue/start/generation waits
 
 ### Lease Expires Too Quickly
 - Increase TTL: `ttl_seconds=7200`

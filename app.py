@@ -35,7 +35,6 @@ from llm_server import (
     is_llm_server_busy,
     ensure_llm_running,
     ensure_llm_running_with_reason,
-    ensure_llm_running_and_ready,
     idle_shutdown_loop,
     llm_activity_poller,
     touch_activity,
@@ -62,8 +61,17 @@ from models import (
     delete_model_alias,
     get_all_model_aliases,
     _load_meta,
+    set_scheduler_capacity,
 )
 import llama_cpp_provider
+from llm_runtime_manager import (
+    RuntimeRequestCancelled,
+    RuntimeTargetError,
+    cancelled_error_payload,
+    get_runtime_scheduler,
+    sse_cancelled_payload,
+)
+from llm_runtime_backends import RuntimeBackendController, resolve_runtime_target
 from lease_api import router as lease_api_router
 from comfyui_service import (
     generate_images as comfyui_generate_images,
@@ -92,6 +100,16 @@ templates = Jinja2Templates(directory="templates")
 # Include lease + proxy API
 app.include_router(lease_api_router)
 
+runtime_scheduler = get_runtime_scheduler()
+runtime_backends = RuntimeBackendController()
+runtime_scheduler.configure(
+    prepare=runtime_backends.prepare,
+    stop_target=runtime_backends.stop_target,
+    force_stop_target=runtime_backends.force_stop_target,
+    reset=runtime_backends.reset,
+    reconcile=runtime_backends.reconcile,
+)
+
 
 def _gpu_history_db_path():
     return getattr(app.state, "gpu_history_db_path", DEFAULT_DB_PATH)
@@ -102,6 +120,7 @@ async def _startup():
     configure_logging(settings.LOG_FILE, settings.LOG_LEVEL)
     init_gpu_history_db(_gpu_history_db_path())
     prune_gpu_history(_gpu_history_db_path())
+    await runtime_scheduler.start()
     # Käynnistä idle-shutdown -looppi taustalle
     asyncio.create_task(idle_shutdown_loop())
     # Käynnistä llama.cpp slot + supplemental CPU activity poller
@@ -117,6 +136,62 @@ async def _shutdown():
     watchdog = getattr(app.state, "gpu_watchdog", None)
     if watchdog is not None:
         await watchdog.stop()
+    await runtime_scheduler.stop()
+
+
+@app.get("/api/runtime/queue")
+async def api_runtime_queue():
+    return runtime_scheduler.snapshot()
+
+
+@app.get("/api/runtime/events")
+async def api_runtime_events(request: Request):
+    async def events():
+        snapshot = runtime_scheduler.snapshot()
+        revision = int(snapshot["revision"])
+        yield _sse_event("snapshot", snapshot)
+        while not await request.is_disconnected():
+            next_snapshot = await runtime_scheduler.wait_for_revision(revision, timeout=15.0)
+            next_revision = int(next_snapshot["revision"])
+            if next_revision == revision:
+                yield _sse_event("heartbeat", {"revision": revision})
+            else:
+                revision = next_revision
+                yield _sse_event("snapshot", next_snapshot)
+
+    return StreamingResponse(events(), media_type="text/event-stream")
+
+
+@app.post("/api/runtime/control")
+async def api_runtime_control(request: Request):
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError("body must be a JSON object")
+        action = str(body.get("action") or "").strip()
+        affected = await runtime_scheduler.control(
+            action,
+            request_id=body.get("request_id"),
+            target_key=body.get("target_key"),
+        )
+    except ValueError as exc:
+        logger.warning("Runtime operator action failed outcome=invalid error=%s", exc)
+        raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+    except RuntimeTargetError as exc:
+        logger.error("Runtime operator action failed action=%s error=%s", body.get("action"), exc)
+        raise HTTPException(status_code=502, detail={"error": str(exc)}) from exc
+    except Exception as exc:
+        logger.exception("Runtime operator action failed action=%s outcome=failed", body.get("action"))
+        raise HTTPException(status_code=502, detail={"error": str(exc)}) from exc
+    snapshot = runtime_scheduler.snapshot()
+    logger.warning(
+        "Runtime operator action completed action=%s request_id=%s target=%s affected=%s",
+        action,
+        body.get("request_id"),
+        body.get("target_key"),
+        affected,
+    )
+    return {"action": action, "affected_request_ids": affected, "snapshot": snapshot}
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
@@ -1020,42 +1095,75 @@ def power_json(action: str = Form(...)):
 
 
 @app.post("/chat_stream")
-def chat_stream(model: str = Form(...), prompt: str = Form(...)):
+async def chat_stream(request: Request, model: str = Form(...), prompt: str = Form(...)):
     """
     Streamaa Ollaman vastauksen selaimelle token- / chunk-kerrallaan.
     Huolehtii myös siitä, että LLM-palvelin herätetään tarvittaessa.
     """
     touch_activity()
 
-    def generate():
-        # Jos LLM ei ole ylhäällä, kerro käyttäjälle ja käynnistä
-        if not llm_server_up():
-            yield "Herätetään LLM-palvelinta, odota hetki...\n"
-            if not ensure_llm_running():
-                yield "Virhe: LLM-palvelinta ei saatu käynnistettyä.\n"
-                return
+    try:
+        target, _public, upstream_model = resolve_runtime_target(model, "generate")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
 
-        url = f"http://{settings.LLM_HOST}:{settings.LLM_PORT}/api/generate"
-        payload = {
-            "model": model,
-            "prompt": prompt,
-            "stream": True
-        }
-        with requests.post(url, json=payload, stream=True, timeout=2400) as r:
-            r.raise_for_status()
-            for line in r.iter_lines():
-                if not line:
-                    continue
-                try:
-                    data = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                chunk = data.get("response", "")
-                if chunk:
-                    touch_activity()
-                    yield chunk
-                if data.get("done"):
-                    break
+    try:
+        permit = await runtime_scheduler.acquire(
+            target, endpoint="/chat_stream", client_id=_runtime_client_id(request), stream=True
+        )
+    except (RuntimeRequestCancelled, RuntimeTargetError) as exc:
+        return _runtime_failure(exc)
+
+    async def generate():
+        client = httpx.AsyncClient(timeout=None)
+        response = None
+        runtime_error = None
+        try:
+            if target.provider == "ollama":
+                url = f"{target.base_url.rstrip('/')}/api/generate"
+                payload = {"model": upstream_model, "prompt": prompt, "stream": True, "keep_alive": -1}
+            else:
+                url = f"{target.base_url.rstrip('/')}/v1/completions"
+                payload = {"model": upstream_model, "prompt": prompt, "stream": True}
+            built = client.build_request("POST", url, json=payload)
+            response = await permit.run(client.send(built, stream=True))
+            if response.status_code >= 400:
+                detail = (await permit.run(response.aread())).decode("utf-8", errors="replace")[:2000]
+                yield f"\n[upstream HTTP {response.status_code}: {detail}]\n"
+                return
+            buffer = b""
+            async for chunk in _permit_chunks(response.aiter_bytes(), permit):
+                buffer += chunk
+                while b"\n" in buffer:
+                    line, buffer = buffer.split(b"\n", 1)
+                    raw = line.strip()
+                    if raw.startswith(b"data:"):
+                        raw = raw[5:].strip()
+                    if not raw or raw == b"[DONE]":
+                        continue
+                    try:
+                        data = json.loads(raw)
+                    except ValueError:
+                        continue
+                    text = data.get("response", "")
+                    if target.provider == "llama_cpp":
+                        choices = data.get("choices") or []
+                        text = choices[0].get("text", "") if choices else ""
+                    if text:
+                        yield text
+        except RuntimeRequestCancelled:
+            yield "\n[request cancelled by operator]\n"
+        except RuntimeTargetError as exc:
+            runtime_error = str(exc)
+            yield f"\n[runtime error: {exc}]\n"
+        except httpx.HTTPError as exc:
+            runtime_error = str(exc)
+            yield f"\n[upstream connection error: {exc}]\n"
+        finally:
+            if response is not None:
+                await response.aclose()
+            await client.aclose()
+            await permit.release(error=runtime_error)
 
     return StreamingResponse(generate(), media_type="text/plain")
 
@@ -1266,7 +1374,15 @@ def api_settings_effective():
                     {"key": "LOG_LEVEL", "label": "Log level", "value": settings.LOG_LEVEL, "type": "text", "source": "config"},
                     {"key": "LOG_FILE", "label": "Log file", "value": settings.LOG_FILE, "type": "path", "source": "config"},
                     {"key": "SERVICE_RESTART_DELAY_SECONDS", "label": "Restart delay", "value": SERVICE_RESTART_DELAY_SECONDS, "type": "number", "unit": "s", "source": "app.py"},
+                    {"key": "SCHEDULER_QUEUE_TIMEOUT_SECONDS", "label": "Queue wait timeout", "value": settings.SCHEDULER_QUEUE_TIMEOUT_SECONDS, "type": "number", "unit": "s (0 = infinite)", "source": "config"},
+                    {"key": "SCHEDULER_STARTUP_TIMEOUT_SECONDS", "label": "Startup/readiness timeout", "value": settings.SCHEDULER_STARTUP_TIMEOUT_SECONDS, "type": "number", "unit": "s (0 = infinite)", "source": "config"},
+                    {"key": "SCHEDULER_GENERATION_TIMEOUT_SECONDS", "label": "Generation timeout", "value": settings.SCHEDULER_GENERATION_TIMEOUT_SECONDS, "type": "number", "unit": "s (0 = infinite)", "source": "config"},
                 ],
+            },
+            "runtime_queue": {
+                "title": "Runtime queue",
+                "custom": "runtime_queue",
+                "fields": [],
             },
             "proxmox": {
                 "title": "Proxmox connection",
@@ -1527,12 +1643,10 @@ def _ollama_api_url(path: str) -> str:
 
 
 async def _ensure_ollama_for_management() -> None:
-    ready = await ensure_llm_running_and_ready()
-    if not ready:
-        raise HTTPException(
-            status_code=503,
-            detail={"error": "Ollama provider is not available"},
-        )
+    try:
+        await runtime_backends.ensure_ollama_available()
+    except RuntimeTargetError as exc:
+        raise HTTPException(status_code=502, detail={"error": str(exc)}) from exc
 
 
 def _refresh_ollama_model_state() -> list[dict]:
@@ -1653,6 +1767,20 @@ async def api_ollama_provider_models():
         "models": rows,
         "profiles": get_model_profiles(),
     }
+
+
+@app.put("/api/providers/ollama/scheduler-capacity")
+async def api_ollama_scheduler_capacity(request: Request):
+    try:
+        body = await request.json()
+        model = str(body.get("model") or "").strip()
+        capacity = int(body.get("scheduler_capacity"))
+        updated = set_scheduler_capacity(model, capacity)
+        target, _, _ = resolve_runtime_target(model)
+        await runtime_scheduler.register_target(target)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+    return {"ok": True, "model": model, "scheduler_capacity": updated["scheduler_capacity"]}
 
 
 @app.post("/api/providers/ollama/models/pull")
@@ -2034,10 +2162,13 @@ async def api_llama_cpp_ssh_test():
 @app.post("/api/providers/llama-cpp/runtime/cleanup")
 async def api_llama_cpp_runtime_cleanup():
     try:
-        result = await asyncio.get_running_loop().run_in_executor(
-            None,
-            llama_cpp_provider.cleanup_llama_cpp_runtime,
-        )
+        affected = []
+        profiles = llama_cpp_provider.list_profiles()
+        for profile in profiles:
+            target, _, _ = resolve_runtime_target(str(profile.get("served_model_id") or ""))
+            await runtime_scheduler.register_target(target)
+            affected.extend(await runtime_scheduler.force_stop(target.target_key))
+        result = {"ok": True, "affected_request_ids": list(dict.fromkeys(affected))}
     except Exception as exc:
         raise HTTPException(status_code=502, detail={"error": str(exc)})
     return {"provider": "llama_cpp", "cleanup": result}
@@ -2181,9 +2312,13 @@ async def api_llama_cpp_delete_profile(profile_id: str):
     existing = llama_cpp_provider.find_profile(profile_id)
     if existing:
         try:
-            llama_cpp_provider.stop_profile(profile_id)
-        except Exception:
-            pass
+            target, _, _ = resolve_runtime_target(str(existing["served_model_id"]))
+            await runtime_scheduler.register_target(target)
+            await runtime_scheduler.cancel_queued(target.target_key)
+            await runtime_scheduler.drain_target(target.target_key)
+            await runtime_scheduler.wait_until_inactive(target.target_key)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail={"error": str(exc)}) from exc
     removed = llama_cpp_provider.delete_profile(profile_id)
     invalidate_model_cache()
     return {**_llama_cpp_profile_payload(), "removed": bool(removed)}
@@ -2194,10 +2329,16 @@ async def api_llama_cpp_start_profile(profile_id: str):
     # Starting/switching a profile is active work even before /slots reaches 503/200.
     touch_activity()
     try:
-        profile = await asyncio.get_running_loop().run_in_executor(
-            None,
-            lambda: llama_cpp_provider.start_profile(profile_id),
+        profile = llama_cpp_provider.find_profile(profile_id)
+        if not profile:
+            raise ValueError("profile not found")
+        target, _, _ = resolve_runtime_target(str(profile["served_model_id"]))
+        await runtime_scheduler.set_paused(target.target_key, False)
+        permit = await runtime_scheduler.acquire(
+            target, endpoint="/api/providers/llama-cpp/start", client_id="settings-ui", stream=False
         )
+        await permit.release()
+        profile = llama_cpp_provider.find_profile(profile_id) or profile
     except Exception as exc:
         raise HTTPException(status_code=502, detail={"error": str(exc)})
     return {**_llama_cpp_profile_payload(), "profile": profile}
@@ -2206,10 +2347,14 @@ async def api_llama_cpp_start_profile(profile_id: str):
 @app.post("/api/providers/llama-cpp/profiles/{profile_id}/stop")
 async def api_llama_cpp_stop_profile(profile_id: str):
     try:
-        profile = await asyncio.get_running_loop().run_in_executor(
-            None,
-            lambda: llama_cpp_provider.stop_profile(profile_id),
-        )
+        profile = llama_cpp_provider.find_profile(profile_id)
+        if not profile:
+            raise ValueError("profile not found")
+        target, _, _ = resolve_runtime_target(str(profile["served_model_id"]))
+        await runtime_scheduler.register_target(target)
+        await runtime_scheduler.drain_target(target.target_key)
+        await runtime_scheduler.wait_until_inactive(target.target_key)
+        profile = llama_cpp_provider.find_profile(profile_id) or profile
     except Exception as exc:
         raise HTTPException(status_code=502, detail={"error": str(exc)})
     return {**_llama_cpp_profile_payload(), "profile": profile}
@@ -2219,10 +2364,19 @@ async def api_llama_cpp_stop_profile(profile_id: str):
 async def api_llama_cpp_restart_profile(profile_id: str):
     touch_activity()
     try:
-        profile = await asyncio.get_running_loop().run_in_executor(
-            None,
-            lambda: llama_cpp_provider.restart_profile(profile_id),
+        profile = llama_cpp_provider.find_profile(profile_id)
+        if not profile:
+            raise ValueError("profile not found")
+        target, _, _ = resolve_runtime_target(str(profile["served_model_id"]))
+        await runtime_scheduler.register_target(target)
+        await runtime_scheduler.drain_target(target.target_key)
+        await runtime_scheduler.wait_until_inactive(target.target_key)
+        await runtime_scheduler.set_paused(target.target_key, False)
+        permit = await runtime_scheduler.acquire(
+            target, endpoint="/api/providers/llama-cpp/restart", client_id="settings-ui", stream=False
         )
+        await permit.release()
+        profile = llama_cpp_provider.find_profile(profile_id) or profile
     except Exception as exc:
         raise HTTPException(status_code=502, detail={"error": str(exc)})
     return {**_llama_cpp_profile_payload(), "profile": profile}
@@ -2344,26 +2498,6 @@ def models_page():
     """
     return HTMLResponse(html)
 
-# Voit halutessasi tehdä tästä async-version:
-async def ensure_llm_running_and_ready(timeout: int = 180) -> bool:
-    loop = asyncio.get_running_loop()
-    start = loop.time()
-
-    # 1) Käynnistä (sync-funktio ajettu threadissa)
-    ok = await loop.run_in_executor(None, ensure_llm_running)
-    if not ok:
-        return False
-
-    # 2) Odota että llm_server_up() on True
-    while loop.time() - start < timeout:
-        up = await loop.run_in_executor(None, llm_server_up)
-        if up:
-            touch_activity()
-            return True
-        await asyncio.sleep(3)
-
-    return False
-
 # --- OpenAI-yhteensopivat endpointit ---
 
 def _resolve_request_model(payload: dict) -> tuple[str | None, str | None]:
@@ -2376,43 +2510,49 @@ def _resolve_request_model(payload: dict) -> tuple[str | None, str | None]:
     return public_model, upstream_model
 
 
-async def _resolve_provider_for_payload(payload: dict) -> tuple[str | None, str | None, str, str]:
+async def _resolve_provider_for_payload(payload: dict, workload: str = "generate"):
     public_model = payload.get("model")
-    if isinstance(public_model, str) and public_model.strip():
-        public_model = public_model.strip()
-        profile = llama_cpp_provider.find_profile_by_model(public_model)
+    if not isinstance(public_model, str) or not public_model.strip():
+        raise HTTPException(status_code=400, detail={"error": "model field is required"})
+    try:
+        target, public, upstream = resolve_runtime_target(public_model, workload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+    payload["model"] = upstream
+    if target.provider == "llama_cpp":
+        profile = llama_cpp_provider.find_profile(str(target.profile_id or ""))
         if profile:
-            payload["model"] = public_model
             _apply_llama_cpp_request_options(payload, profile)
-            loop = asyncio.get_running_loop()
-            try:
-                ok, message = await loop.run_in_executor(None, _ensure_llama_cpp_host_running)
-                if not ok:
-                    raise RuntimeError(message)
-                status = await loop.run_in_executor(None, lambda: llama_cpp_provider.status_for_profile(profile))
-                did_start = _should_start_llama_cpp_profile(status)
-                if did_start:
-                    await loop.run_in_executor(None, lambda: llama_cpp_provider.start_profile(str(profile["id"])))
-                refreshed = llama_cpp_provider.find_profile(str(profile["id"])) or profile
-                ready_timeout = _llama_cpp_readiness_timeout(did_start)
-                ready = await loop.run_in_executor(
-                    None,
-                    lambda: llama_cpp_provider.wait_until_ready(refreshed, timeout=ready_timeout),
-                )
-            except Exception as exc:
-                raise HTTPException(
-                    status_code=503,
-                    detail={"error": f"llama.cpp profile start failed: {exc}"},
-                )
-            if not ready:
-                raise HTTPException(
-                    status_code=503,
-                    detail={"error": "llama.cpp profile readiness timed out"},
-                )
-            return public_model, public_model, llama_cpp_provider.profile_base_url(refreshed), "llama_cpp"
+    else:
+        payload["keep_alive"] = -1
+    return public, upstream, target.base_url, target.provider, target
 
-    public, upstream = _resolve_request_model(payload)
-    return public, upstream, settings.LLM_SERVER_BASE, "ollama"
+
+def _runtime_client_id(request: Request) -> str:
+    explicit = request.headers.get("x-client-id")
+    if explicit:
+        return explicit[:160]
+    host = request.client.host if request.client else "unknown"
+    agent = request.headers.get("user-agent", "")[:100]
+    return f"{host} {agent}".strip()
+
+
+def _runtime_failure(exc: Exception) -> JSONResponse:
+    if isinstance(exc, RuntimeRequestCancelled):
+        return JSONResponse(status_code=409, content=cancelled_error_payload(exc))
+    return JSONResponse(
+        status_code=502,
+        content={"error": {"message": str(exc), "type": "runtime_target_error"}},
+    )
+
+
+async def _permit_chunks(byte_iter, permit):
+    iterator = byte_iter.__aiter__()
+    while True:
+        try:
+            yield await permit.run(iterator.__anext__())
+        except StopAsyncIteration:
+            return
 
 
 def _ensure_llama_cpp_host_running() -> tuple[bool, str]:
@@ -2728,21 +2868,7 @@ async def chat_completions(request: Request):
     if stream:
         upstream_payload["stream"] = True
 
-    public_model, upstream_model, upstream_base, upstream_provider = await _resolve_provider_for_payload(upstream_payload)
-
-    # 1) Varmistetaan, että llm-server on hereillä
-    if upstream_provider == "ollama":
-        ready = await ensure_llm_running_and_ready()
-        if not ready:
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "error": {
-                        "message": "LLM server not available",
-                        "type": "server_error",
-                    }
-                },
-            )
+    public_model, upstream_model, upstream_base, upstream_provider, target = await _resolve_provider_for_payload(upstream_payload)
 
     upstream_url = f"{upstream_base.rstrip('/')}/v1/chat/completions"
     headers = {"Content-Type": "application/json"}
@@ -2752,21 +2878,52 @@ async def chat_completions(request: Request):
 
     # 2) Jos pyydetään streamausta → välitetään SSE-stream läpi
     if stream:
+        try:
+            permit = await runtime_scheduler.acquire(
+                target, endpoint="/v1/chat/completions", client_id=_runtime_client_id(request), stream=True
+            )
+        except (RuntimeRequestCancelled, RuntimeTargetError) as exc:
+            return _runtime_failure(exc)
+
         async def stream_from_upstream():
-            async with httpx.AsyncClient(timeout=None) as client:
-                async with client.stream(
-                    "POST",
-                    upstream_url,
-                    content=upstream_body,
-                    headers=headers,
-                ) as upstream_resp:
-                    async for chunk in _rewrite_upstream_sse_chunks(
-                        upstream_resp.aiter_bytes(),
-                        public_model,
-                        upstream_model,
-                        upstream_provider,
-                    ):
-                        yield chunk
+            client = httpx.AsyncClient(timeout=None)
+            response = None
+            runtime_error = None
+            try:
+                built = client.build_request("POST", upstream_url, content=upstream_body, headers=headers)
+                response = await permit.run(client.send(built, stream=True))
+                if response.status_code >= 400:
+                    detail = (await permit.run(response.aread())).decode("utf-8", errors="replace")[:2000]
+                    payload = {
+                        "error": {
+                            "message": f"Upstream returned HTTP {response.status_code}: {detail}",
+                            "type": "upstream_error",
+                        }
+                    }
+                    yield b"data: " + json.dumps(payload).encode("utf-8") + b"\n\ndata: [DONE]\n\n"
+                    return
+                async for chunk in _rewrite_upstream_sse_chunks(
+                    _permit_chunks(response.aiter_bytes(), permit),
+                    public_model,
+                    upstream_model,
+                    upstream_provider,
+                ):
+                    yield chunk
+            except RuntimeRequestCancelled as exc:
+                yield sse_cancelled_payload(exc)
+            except RuntimeTargetError as exc:
+                runtime_error = str(exc)
+                payload = {"error": {"message": str(exc), "type": "runtime_target_error"}}
+                yield b"data: " + json.dumps(payload).encode("utf-8") + b"\n\ndata: [DONE]\n\n"
+            except httpx.HTTPError as exc:
+                runtime_error = str(exc)
+                payload = {"error": {"message": str(exc), "type": "upstream_connection_error"}}
+                yield b"data: " + json.dumps(payload).encode("utf-8") + b"\n\ndata: [DONE]\n\n"
+            finally:
+                if response is not None:
+                    await response.aclose()
+                await client.aclose()
+                await permit.release(error=runtime_error)
 
         return StreamingResponse(
             stream_from_upstream(),
@@ -2774,12 +2931,28 @@ async def chat_completions(request: Request):
         )
 
     # 3) Ei streamausta → tavallinen JSON-proxy
-    async with httpx.AsyncClient(timeout=None) as client:
-        upstream_resp = await client.post(
-            upstream_url,
-            content=upstream_body,
-            headers=headers,
+    try:
+        permit = await runtime_scheduler.acquire(
+            target, endpoint="/v1/chat/completions", client_id=_runtime_client_id(request), stream=False
         )
+        runtime_error = None
+        try:
+            async with httpx.AsyncClient(timeout=None) as client:
+                upstream_resp = await permit.run(client.post(
+                    upstream_url,
+                    content=upstream_body,
+                    headers=headers,
+                ))
+        except RuntimeTargetError as exc:
+            runtime_error = str(exc)
+            raise
+        except httpx.HTTPError as exc:
+            runtime_error = str(exc)
+            raise RuntimeTargetError(f"upstream connection failed: {exc}") from exc
+        finally:
+            await permit.release(error=runtime_error)
+    except (RuntimeRequestCancelled, RuntimeTargetError) as exc:
+        return _runtime_failure(exc)
 
     try:
         data = upstream_resp.json()
@@ -2970,20 +3143,7 @@ async def completions(request: Request):
         upstream_payload["max_tokens"] = max(1, int(max_tokens))
     if stream:
         upstream_payload["stream"] = True
-    public_model, upstream_model, upstream_base, upstream_provider = await _resolve_provider_for_payload(upstream_payload)
-
-    if upstream_provider == "ollama":
-        ready = await ensure_llm_running_and_ready()
-        if not ready:
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "error": {
-                        "message": "LLM server not available",
-                        "type": "server_error",
-                    }
-                },
-            )
+    public_model, upstream_model, upstream_base, upstream_provider, target = await _resolve_provider_for_payload(upstream_payload)
 
     upstream_url = f"{upstream_base.rstrip('/')}/v1/completions"
     headers = {"Content-Type": "application/json"}
@@ -2991,7 +3151,14 @@ async def completions(request: Request):
 
     # Streaming: pass through SSE if upstream supports /v1/completions; otherwise fallback to chat proxy.
     if stream:
-        async def _stream_from_chat_fallback(prompt_text: str, original_body: dict, headers_in: dict):
+        try:
+            permit = await runtime_scheduler.acquire(
+                target, endpoint="/v1/completions", client_id=_runtime_client_id(request), stream=True
+            )
+        except (RuntimeRequestCancelled, RuntimeTargetError) as exc:
+            return _runtime_failure(exc)
+
+        async def _stream_from_chat_fallback(prompt_text: str, original_body: dict, headers_in: dict, permit):
             # Build a chat request from the legacy prompt and map chat SSE chunks to completion SSE chunks.
             messages = [{"role": "user", "content": str(prompt_text)}]
             system_prompt = original_body.get("system_prompt")
@@ -3011,13 +3178,20 @@ async def completions(request: Request):
 
             buffer = b""
             async with httpx.AsyncClient(timeout=None) as client:
-                async with client.stream(
-                    "POST",
-                    chat_url,
-                    content=chat_body,
-                    headers=headers_in,
-                ) as upstream_resp:
-                    async for chunk in upstream_resp.aiter_bytes():
+                built = client.build_request("POST", chat_url, content=chat_body, headers=headers_in)
+                upstream_resp = await permit.run(client.send(built, stream=True))
+                if upstream_resp.status_code >= 400 and upstream_resp.status_code not in (404, 405):
+                    detail = (await permit.run(upstream_resp.aread())).decode("utf-8", errors="replace")[:2000]
+                    payload = {
+                        "error": {
+                            "message": f"Upstream returned HTTP {upstream_resp.status_code}: {detail}",
+                            "type": "upstream_error",
+                        }
+                    }
+                    yield b"data: " + json.dumps(payload).encode("utf-8") + b"\n\ndata: [DONE]\n\n"
+                    return
+                try:
+                    async for chunk in _permit_chunks(upstream_resp.aiter_bytes(), permit):
                         buffer += chunk
                         while b"\n" in buffer:
                             line, buffer = buffer.split(b"\n", 1)
@@ -3038,98 +3212,100 @@ async def completions(request: Request):
                             mapped = _rewrite_upstream_json(mapped, public_model, upstream_model, upstream_provider)
                             out = json.dumps(mapped).encode("utf-8")
                             yield b"data: " + out + b"\n\n"
+                finally:
+                    await upstream_resp.aclose()
 
         async def stream_from_upstream():
-            async with httpx.AsyncClient(timeout=None) as client:
-                async with client.stream(
-                    "POST",
-                    upstream_url,
-                    content=upstream_body,
-                    headers=headers,
-                ) as upstream_resp:
-                    if upstream_resp.status_code in (404, 405):
-                        # Fallback: emulate completions via chat/completions and map stream chunks.
-                        logger.info("upstream /v1/completions unsupported; falling back to chat proxy")
-                        async for item in _stream_from_chat_fallback(prompt, upstream_payload, headers):
-                            yield item
-                        return
+            client = httpx.AsyncClient(timeout=None)
+            upstream_resp = None
+            runtime_error = None
+            try:
+                built = client.build_request("POST", upstream_url, content=upstream_body, headers=headers)
+                upstream_resp = await permit.run(client.send(built, stream=True))
+                if upstream_resp.status_code in (404, 405):
+                    logger.info("upstream /v1/completions unsupported; falling back to chat proxy")
+                    await upstream_resp.aclose()
+                    upstream_resp = None
+                    async for item in _stream_from_chat_fallback(prompt, upstream_payload, headers, permit):
+                        yield item
+                    return
 
-                    async for chunk in _rewrite_upstream_sse_chunks(
-                        upstream_resp.aiter_bytes(),
-                        public_model,
-                        upstream_model,
-                        upstream_provider,
-                    ):
-                        yield chunk
+                async for chunk in _rewrite_upstream_sse_chunks(
+                    _permit_chunks(upstream_resp.aiter_bytes(), permit),
+                    public_model,
+                    upstream_model,
+                    upstream_provider,
+                ):
+                    yield chunk
+            except RuntimeRequestCancelled as exc:
+                yield sse_cancelled_payload(exc)
+            except RuntimeTargetError as exc:
+                runtime_error = str(exc)
+                payload = {"error": {"message": str(exc), "type": "runtime_target_error"}}
+                yield b"data: " + json.dumps(payload).encode("utf-8") + b"\n\ndata: [DONE]\n\n"
+            except httpx.HTTPError as exc:
+                runtime_error = str(exc)
+                payload = {"error": {"message": str(exc), "type": "upstream_connection_error"}}
+                yield b"data: " + json.dumps(payload).encode("utf-8") + b"\n\ndata: [DONE]\n\n"
+            finally:
+                if upstream_resp is not None:
+                    await upstream_resp.aclose()
+                await client.aclose()
+                await permit.release(error=runtime_error)
 
         return StreamingResponse(stream_from_upstream(), media_type="text/event-stream")
 
-    async with httpx.AsyncClient(timeout=None) as client:
-        upstream_resp = await client.post(
-            upstream_url,
-            content=upstream_body,
-            headers=headers,
-        )
-
-    # If upstream doesn't implement /v1/completions, fallback to chat proxy and map response format.
-    if upstream_resp.status_code in (404, 405):
-        logger.info("upstream /v1/completions unsupported; falling back to chat proxy")
-
-        messages = [{"role": "user", "content": str(prompt)}]
-        system_prompt = body.get("system_prompt")
-        if system_prompt:
-            messages.insert(0, {"role": "system", "content": system_prompt})
-
-        chat_payload = dict(upstream_payload)
-        chat_payload["messages"] = messages
-        chat_payload.pop("prompt", None)
-        chat_payload.pop("system_prompt", None)
-        if upstream_model:
-            chat_payload["model"] = upstream_model
-
-        chat_url = f"{upstream_base.rstrip('/')}/v1/chat/completions"
-        chat_body = json.dumps(chat_payload).encode("utf-8")
-
-        async with httpx.AsyncClient(timeout=None) as client:
-            upstream_resp = await client.post(
-                chat_url,
-                content=chat_body,
-                headers=headers,
-            )
-
-        try:
-            data = upstream_resp.json()
-        except Exception:
-            return JSONResponse(
-                status_code=502,
-                content={
-                    "error": {
-                        "message": "Invalid response from upstream",
-                        "type": "bad_gateway",
-                    }
-                },
-            )
-
-        mapped = _chat_to_completion_response(data)
-        mapped = _rewrite_upstream_json(mapped, public_model, upstream_model, upstream_provider)
-        return JSONResponse(status_code=upstream_resp.status_code, content=mapped)
-
     try:
-        data = upstream_resp.json()
-    except Exception:
-        return JSONResponse(
-            status_code=502,
-            content={
-                "error": {
-                    "message": "Invalid response from upstream",
-                    "type": "bad_gateway",
-                }
-            },
+        permit = await runtime_scheduler.acquire(
+            target, endpoint="/v1/completions", client_id=_runtime_client_id(request), stream=False
         )
-
-    # Upstream already returned a completion-shaped response; return as-is.
-    data = _rewrite_upstream_json(data, public_model, upstream_model, upstream_provider)
-    return JSONResponse(status_code=upstream_resp.status_code, content=data)
+        runtime_error = None
+        try:
+            async with httpx.AsyncClient(timeout=None) as client:
+                upstream_resp = await permit.run(client.post(
+                    upstream_url, content=upstream_body, headers=headers
+                ))
+            used_fallback = upstream_resp.status_code in (404, 405)
+            if used_fallback:
+                logger.info("upstream /v1/completions unsupported; falling back to chat proxy")
+                messages = [{"role": "user", "content": str(prompt)}]
+                system_prompt = body.get("system_prompt")
+                if system_prompt:
+                    messages.insert(0, {"role": "system", "content": system_prompt})
+                chat_payload = dict(upstream_payload)
+                chat_payload["messages"] = messages
+                chat_payload.pop("prompt", None)
+                chat_payload.pop("system_prompt", None)
+                if upstream_model:
+                    chat_payload["model"] = upstream_model
+                chat_url = f"{upstream_base.rstrip('/')}/v1/chat/completions"
+                async with httpx.AsyncClient(timeout=None) as client:
+                    upstream_resp = await permit.run(client.post(
+                        chat_url,
+                        content=json.dumps(chat_payload).encode("utf-8"),
+                        headers=headers,
+                    ))
+            try:
+                data = upstream_resp.json()
+            except Exception:
+                return JSONResponse(
+                    status_code=502,
+                    content={"error": {"message": "Invalid response from upstream", "type": "bad_gateway"}},
+                )
+            if used_fallback:
+                data = _chat_to_completion_response(data)
+            data = _rewrite_upstream_json(data, public_model, upstream_model, upstream_provider)
+            return JSONResponse(status_code=upstream_resp.status_code, content=data)
+        except RuntimeTargetError as exc:
+            runtime_error = str(exc)
+            raise
+        except httpx.HTTPError as exc:
+            runtime_error = str(exc)
+            raise RuntimeTargetError(f"upstream connection failed: {exc}") from exc
+        finally:
+            await permit.release(error=runtime_error)
+    except (RuntimeRequestCancelled, RuntimeTargetError) as exc:
+        return _runtime_failure(exc)
 
 
 @app.get("/api/embedding-models")
@@ -3186,7 +3362,13 @@ async def create_embeddings(request: Request):
                 }
             },
         )
-    upstream_model = resolve_model_for_upstream(model)
+    try:
+        target, _public_model, upstream_model = resolve_runtime_target(model, "embed")
+    except ValueError as exc:
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"message": str(exc), "type": "invalid_request_error"}},
+        )
     
     if input_data is None:
         return JSONResponse(
@@ -3233,21 +3415,8 @@ async def create_embeddings(request: Request):
         # Cached contains the "data" array from Ollama response
         embeddings_data_array = cached
     else:
-        # 2) Varmistetaan, että llm-server on hereillä
-        ready = await ensure_llm_running_and_ready()
-        if not ready:
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "error": {
-                        "message": "LLM server not available",
-                        "type": "server_error",
-                    }
-                },
-            )
-        
-        # 3) Proxaa Ollaman /v1/embeddings -endpointtiin
-        upstream_url = f"{settings.LLM_SERVER_BASE}/v1/embeddings"
+        # 2) Queue and proxy to the selected provider.
+        upstream_url = f"{target.base_url.rstrip('/')}/v1/embeddings"
         headers = {"Content-Type": "application/json"}
         
         # Rakenna payload Ollaman odottamassa muodossa
@@ -3256,14 +3425,29 @@ async def create_embeddings(request: Request):
             "model": upstream_model,
             "input": texts,
         }
+        if target.provider == "ollama":
+            upstream_payload["keep_alive"] = -1
         
         try:
-            async with httpx.AsyncClient(timeout=60) as client:
-                upstream_resp = await client.post(
-                    upstream_url,
-                    json=upstream_payload,
-                    headers=headers,
-                )
+            permit = await runtime_scheduler.acquire(
+                target, endpoint="/v1/embeddings", client_id=_runtime_client_id(request), stream=False
+            )
+            runtime_error = None
+            try:
+                async with httpx.AsyncClient(timeout=None) as client:
+                    upstream_resp = await permit.run(client.post(
+                        upstream_url,
+                        json=upstream_payload,
+                        headers=headers,
+                    ))
+            except RuntimeTargetError as exc:
+                runtime_error = str(exc)
+                raise
+            except httpx.HTTPError as exc:
+                runtime_error = str(exc)
+                raise RuntimeTargetError(f"upstream connection failed: {exc}") from exc
+            finally:
+                await permit.release(error=runtime_error)
             
             if upstream_resp.status_code != 200:
                 # Try to get detailed error message from Ollama
@@ -3291,9 +3475,11 @@ async def create_embeddings(request: Request):
             # Cache the result
             cache_embeddings(upstream_model, texts, embeddings_data_array)
         
+        except (RuntimeRequestCancelled, RuntimeTargetError) as exc:
+            return _runtime_failure(exc)
         except Exception as e:
             return JSONResponse(
-                status_code=503,
+                status_code=502,
                 content={
                     "error": {
                         "message": f"Error calling embedding service: {str(e)}",

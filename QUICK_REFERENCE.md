@@ -24,7 +24,7 @@ curl -X POST http://localhost:8000/v1/lease \
   -H "Content-Type: application/json" \
   -d '{"client_id": "app", "purpose": "chat", "ttl_seconds": 3600}'
 ```
-Returns: `lease_id`, `status` ("ready" or "starting")
+Returns HTTP 201 with `lease_id` and `status: "ready"`. Model startup happens on inference.
 
 ### Get Lease Status
 ```bash
@@ -134,10 +134,11 @@ requests.post(
 | Env Var | Default | Purpose |
 |---------|---------|---------|
 | `LLM_AGENT_TOKEN` | (required) | Bearer token for auth |
-| `LLM_BASE_URL` | `http://192.168.8.33:11434` | LLM server URL |
-| `LLM_READINESS_PATH` | `/api/tags` | Readiness endpoint |
+| `LLM_BASE_URL` | `http://192.168.8.33:11434` | Internal upstream URL; never use from clients |
+| `SCHEDULER_QUEUE_TIMEOUT_SECONDS` | `0` | Queue deadline (`0` = infinite) |
+| `SCHEDULER_STARTUP_TIMEOUT_SECONDS` | `0` | Startup deadline (`0` = infinite) |
+| `SCHEDULER_GENERATION_TIMEOUT_SECONDS` | `0` | Generation deadline (`0` = infinite) |
 | `LEASE_DEFAULT_TTL` | `3600` | Default lease duration |
-| `LLM_READINESS_TIMEOUT` | `120` | VM warmup timeout |
 | `POWER_MODE` | `Medium` | Idle shutdown (Off/Medium/High) |
 | `COMFYUI_BASE_URL` | `http://192.168.8.33:8188` | ComfyUI base URL |
 | `COMFYUI_IDLE_SECONDS` | `600` | ComfyUI idle shutdown |
@@ -194,10 +195,13 @@ echo $LLM_AGENT_TOKEN
 python3 setup_lease_api.py --generate-token
 ```
 
-### 503 LLM Not Ready
+### Runtime Work Is Waiting
 ```bash
-# Test readiness directly
-curl http://192.168.8.33:11434/api/tags
+# Test scheduler readiness through llm-agent
+curl http://192.168.8.36:8000/v1/health
+
+# Inspect the sanitized queue and transition state
+curl http://192.168.8.36:8000/api/runtime/queue
 
 # Check VM status
 ssh proxmox "qm status 101"
@@ -246,7 +250,8 @@ curl http://localhost:8000/v1/health \
 
 ✅ Time-limited leases with auto-expiry
 ✅ Automatic VM power-on when needed
-✅ Readiness polling with exponential backoff
+✅ Infinite-by-default queue, startup, and generation waits
+✅ GPU-aware target switching and capacity control
 ✅ HTTP proxy with streaming support
 ✅ Concurrent lease management
 ✅ Disk persistence (survives restarts)
