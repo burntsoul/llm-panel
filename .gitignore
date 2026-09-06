@@ -14,3 +14,4 @@ data/*.sqlite3-*
 logs/llm-agent.log
 model_meta.json
 logs/llm-agent.log
+config/llama_cpp.json
