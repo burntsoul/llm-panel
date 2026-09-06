@@ -8,10 +8,11 @@ config/local.json
 data/*.sqlite3
 data/*.sqlite3-*
 
+logs/llm-agent.log
+logs/llm-agent.*
+model_meta.json
+config/llama_cpp.json
 
 # Local virtualenv
 .venv/
-logs/llm-agent.log
-model_meta.json
-logs/llm-agent.log
-config/llama_cpp.json
+
